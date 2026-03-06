@@ -1,0 +1,256 @@
+import { createUIController } from "./ui.js";
+import { createZipBlob } from "./zip.js";
+
+const STAGE_WEIGHTS = {
+  reading: 0.14,
+  segmenting: 0.14,
+  chunking: 0.16,
+  concept_extraction: 0.2,
+  graph_build: 0.14,
+  symbolic_streams: 0.06,
+  finalize: 0.06,
+  archive_generation: 0.1
+};
+
+const STAGE_LABELS = {
+  reading: "Reading input file...",
+  segmenting: "Segmenting sessions...",
+  chunking: "Building chunks...",
+  concept_extraction: "Extracting recurring concepts...",
+  graph_build: "Building graph artifacts...",
+  symbolic_streams: "Generating symbolic streams...",
+  finalize: "Preparing output files...",
+  archive_generation: "Generating ZIP archive..."
+};
+
+const ui = createUIController();
+ui.resetProgress();
+
+const state = {
+  running: false,
+  startedAt: 0,
+  timerId: null,
+  worker: null,
+  stageProgress: Object.create(null),
+  objectUrl: null,
+  warnings: []
+};
+
+ui.onGenerate(() => {
+  startGeneration().catch((error) => {
+    failGeneration(error);
+  });
+});
+
+async function startGeneration() {
+  if (state.running) {
+    return;
+  }
+
+  const file = ui.getSelectedFile();
+  if (!file) {
+    ui.setStatus("Select a .txt file first.");
+    return;
+  }
+
+  if (!isLikelyTextFile(file)) {
+    ui.setStatus("Please choose a plain text (.txt) file.");
+    return;
+  }
+
+  await ensureJsZipLoaded();
+  resetRunState();
+
+  state.running = true;
+  state.startedAt = performance.now();
+  state.warnings = [];
+  ui.setBusy(true);
+  ui.setProgress(0, STAGE_LABELS.reading);
+  ui.setTiming(0, Number.NaN);
+
+  state.timerId = window.setInterval(() => {
+    renderTiming();
+  }, 300);
+
+  const worker = new Worker(new URL("./worker.js", import.meta.url), { type: "module" });
+  state.worker = worker;
+
+  worker.addEventListener("message", async (event) => {
+    try {
+      await handleWorkerMessage(event.data);
+    } catch (error) {
+      failGeneration(error);
+    }
+  });
+
+  worker.addEventListener("error", (event) => {
+    failGeneration(event.error || new Error("Worker crashed."));
+  });
+
+  worker.postMessage({
+    type: "start",
+    file,
+    settings: ui.getSettings()
+  });
+}
+
+async function handleWorkerMessage(message) {
+  if (!message || !state.running) {
+    return;
+  }
+
+  if (message.type === "progress") {
+    const stage = message.stage;
+    if (!Object.prototype.hasOwnProperty.call(STAGE_WEIGHTS, stage)) {
+      return;
+    }
+
+    state.stageProgress[stage] = boundedProgress(message.stageProgress);
+    const status = message.status || STAGE_LABELS[stage] || "Working...";
+    const progress = computeOverallProgress();
+    ui.setProgress(progress * 100, status);
+    renderTiming(progress);
+    return;
+  }
+
+  if (message.type === "warning") {
+    state.warnings.push(message.warning);
+    ui.setWarnings(state.warnings);
+    return;
+  }
+
+  if (message.type === "complete") {
+    state.stageProgress.finalize = 1;
+    ui.setProgress(computeOverallProgress() * 100, STAGE_LABELS.archive_generation);
+
+    const zipBlob = await createZipBlob(message.files, (archiveProgress) => {
+      state.stageProgress.archive_generation = boundedProgress(archiveProgress);
+      const overall = computeOverallProgress();
+      ui.setProgress(overall * 100, STAGE_LABELS.archive_generation);
+      renderTiming(overall);
+    });
+
+    if (state.objectUrl) {
+      URL.revokeObjectURL(state.objectUrl);
+    }
+
+    state.objectUrl = URL.createObjectURL(zipBlob);
+    ui.setDownload(state.objectUrl, message.downloadName);
+
+    const summary = message.report;
+    const doneStatus = `Done. ${summary.total_sessions} sessions, ${summary.total_chunks} chunks, ${summary.total_concepts} concepts, ${summary.total_edges} edges.`;
+
+    if (Array.isArray(message.warnings)) {
+      state.warnings.push(...message.warnings);
+    }
+
+    ui.setWarnings(state.warnings);
+    state.stageProgress.archive_generation = 1;
+    ui.setProgress(100, doneStatus);
+    renderTiming(1);
+    finishGeneration();
+    return;
+  }
+
+  if (message.type === "error") {
+    throw new Error(message.error || "Generation failed.");
+  }
+}
+
+function finishGeneration() {
+  state.running = false;
+  ui.setBusy(false);
+
+  if (state.worker) {
+    state.worker.terminate();
+    state.worker = null;
+  }
+
+  if (state.timerId) {
+    clearInterval(state.timerId);
+    state.timerId = null;
+  }
+}
+
+function failGeneration(error) {
+  console.error(error);
+  const message = error instanceof Error ? error.message : "Generation failed.";
+  ui.setStatus(`Error: ${message}`);
+  state.warnings.push("Generation did not finish. Review the error and retry with a smaller file if needed.");
+  ui.setWarnings(state.warnings);
+  finishGeneration();
+}
+
+function resetRunState() {
+  state.stageProgress = Object.create(null);
+  state.warnings = [];
+  ui.setWarnings([]);
+  ui.setDownload(null, null);
+}
+
+function renderTiming(progressOverride) {
+  if (!state.startedAt) {
+    return;
+  }
+
+  const elapsed = performance.now() - state.startedAt;
+  const progress = typeof progressOverride === "number" ? progressOverride : computeOverallProgress();
+
+  let eta = Number.NaN;
+  if (progress > 0.01 && progress < 1) {
+    eta = elapsed * ((1 - progress) / progress);
+  }
+
+  ui.setTiming(elapsed, eta);
+}
+
+function computeOverallProgress() {
+  let total = 0;
+  for (const [stage, weight] of Object.entries(STAGE_WEIGHTS)) {
+    total += (state.stageProgress[stage] || 0) * weight;
+  }
+  return Math.max(0, Math.min(1, total));
+}
+
+function boundedProgress(value) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) {
+    return 0;
+  }
+  return Math.max(0, Math.min(1, number));
+}
+
+function isLikelyTextFile(file) {
+  const lower = file.name.toLowerCase();
+  if (lower.endsWith(".txt") || lower.endsWith(".md") || lower.endsWith(".log")) {
+    return true;
+  }
+  return file.type.startsWith("text/");
+}
+
+async function ensureJsZipLoaded() {
+  if (window.JSZip) {
+    return;
+  }
+
+  await tryLoadScript("./vendor/jszip.min.js").catch(() => null);
+  if (window.JSZip) {
+    return;
+  }
+
+  await tryLoadScript("https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js");
+  if (!window.JSZip) {
+    throw new Error("Unable to load JSZip.");
+  }
+}
+
+function tryLoadScript(src) {
+  return new Promise((resolve, reject) => {
+    const script = document.createElement("script");
+    script.src = src;
+    script.async = true;
+    script.onload = () => resolve();
+    script.onerror = () => reject(new Error(`Could not load script: ${src}`));
+    document.head.appendChild(script);
+  });
+}

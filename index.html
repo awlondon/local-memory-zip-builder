@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Local Memory ZIP Builder</title>
+  <link rel="stylesheet" href="./assets/styles.css">
+</head>
+<body>
+  <main class="app-shell">
+    <header class="hero">
+      <p class="eyebrow">Client-side memory packaging</p>
+      <h1>Local Memory ZIP Builder</h1>
+      <p class="lead">
+        Upload one <code>.txt</code> file to generate a deterministic <code>local_memory/</code> archive for lazy retrieval by local agents.
+      </p>
+    </header>
+
+    <section class="card">
+      <h2>Input</h2>
+      <p class="help">
+        Drag and drop a text file, or choose one manually. Processing runs in a Web Worker to keep the UI responsive.
+      </p>
+      <div id="drop-zone" class="drop-zone" tabindex="0" role="button" aria-label="Drop a text file here">
+        <p id="drop-label">Drop .txt file here or click to browse</p>
+        <input id="file-input" type="file" accept=".txt,text/plain" hidden>
+      </div>
+      <p id="selected-file" class="meta">No file selected.</p>
+    </section>
+
+    <section class="card">
+      <h2>Settings</h2>
+      <div class="settings-grid">
+        <label>
+          Target session size
+          <select id="session-size">
+            <option value="small">Small</option>
+            <option value="medium" selected>Medium</option>
+            <option value="large">Large</option>
+          </select>
+        </label>
+
+        <label>
+          Concept extraction aggressiveness
+          <select id="concept-aggressiveness">
+            <option value="low">Low</option>
+            <option value="medium" selected>Medium</option>
+            <option value="high">High</option>
+          </select>
+        </label>
+
+        <label class="checkbox">
+          <input id="include-symbolic" type="checkbox" checked>
+          Include symbolic streams
+        </label>
+
+        <label class="checkbox">
+          <input id="include-raw" type="checkbox" checked disabled>
+          Include raw session shards (always on in V1)
+        </label>
+      </div>
+    </section>
+
+    <section class="card actions">
+      <button id="generate-btn" class="primary">Generate ZIP</button>
+      <a id="download-btn" class="secondary hidden" download>Download ZIP</a>
+    </section>
+
+    <section class="card">
+      <h2>Progress</h2>
+      <div class="progress-row">
+        <progress id="progress" value="0" max="100"></progress>
+        <span id="progress-label">0%</span>
+      </div>
+      <p id="status-line" class="status">Idle.</p>
+      <div class="timing">
+        <span id="elapsed">Elapsed: 00:00</span>
+        <span id="eta">ETA: --:--</span>
+      </div>
+      <ul id="warnings" class="warnings hidden"></ul>
+    </section>
+
+    <section class="card">
+      <h2>Post-generation setup</h2>
+      <ol>
+        <li>Download the ZIP file.</li>
+        <li>Unarchive it locally.</li>
+        <li>Keep the resulting <code>local_memory/</code> directory intact.</li>
+        <li>Point your local LLM/coding agent at that directory.</li>
+        <li>Have the agent read manifests and indices first, then open raw shards only as needed.</li>
+      </ol>
+    </section>
+  </main>
+
+  <script type="module" src="./src/app.js"></script>
+</body>
+</html>
