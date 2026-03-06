@@ -51,9 +51,14 @@ local_memory/
 3. Upload a text file and click **Generate ZIP**.
 4. Download and unzip the archive.
 
-## GitHub Pages
+## GitHub Pages deployment
 
-This project is static. You can deploy it directly with GitHub Pages from the repository root.
+A workflow is already included at `.github/workflows/deploy-pages.yml`.
+
+1. Push this repo to GitHub with `main` as the default branch.
+2. In GitHub: **Settings -> Pages -> Build and deployment -> Source**, select **GitHub Actions**.
+3. Push to `main` (or run the workflow manually from **Actions**).
+4. After it completes, your site will be available at `https://<your-user>.github.io/<repo-name>/`.
 
 ## Notes on determinism and limits
 
@@ -68,4 +73,3 @@ The app tries to load JSZip from `./vendor/jszip.min.js` first, then falls back 
 `https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js`.
 
 For strict offline usage, place JSZip at `vendor/jszip.min.js`.
-
