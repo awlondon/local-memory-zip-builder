@@ -131,7 +131,7 @@ async function runPipeline({ file, settings }) {
   const allConcepts = [];
   const allEdges = [];
   const allConceptStats = [];
-  const allSymbolicFiles = [];
+  const allSymbolicFiles = [];`r`n  const chunkTextShardPaths = [];
 
   const counters = {
     session: 1,
@@ -257,6 +257,24 @@ async function runPipeline({ file, settings }) {
       }
     }
 
+    const chunkTextShardPath = `local_memory/chunks/chunk_text_part_${padNumber(i + 1)}.jsonl`;
+    const chunkTextRecords = [];
+    for (let j = 0; j < remapped.chunks.length; j += 1) {
+      const chunk = remapped.chunks[j];
+      chunkTextRecords.push({
+        chunk_id: chunk.chunk_id,
+        session_id: chunk.session_id,
+        seq_in_session: chunk.seq_in_session,
+        start_offset: chunk.start_offset,
+        end_offset: chunk.end_offset,
+        kind: chunk.kind,
+        text: chunk.text
+      });
+    }
+
+    files.push({ path: chunkTextShardPath, content: buildJsonlPayload(chunkTextRecords) });
+    chunkTextShardPaths.push(chunkTextShardPath);
+
     const lightweightSessions = remapped.sessions.map((session) => ({
       session_id: session.session_id,
       title: session.title,
@@ -266,15 +284,20 @@ async function runPipeline({ file, settings }) {
       concept_ids: session.concept_ids
     }));
 
-    const lightweightChunks = remapped.chunks.map((chunk) => ({
-      chunk_id: chunk.chunk_id,
-      session_id: chunk.session_id,
-      seq_in_session: chunk.seq_in_session,
-      start_offset: chunk.start_offset,
-      end_offset: chunk.end_offset,
-      kind: chunk.kind,
-      text_preview: makePreview(chunk.text)
-    }));
+    const lightweightChunks = [];
+    for (let j = 0; j < remapped.chunks.length; j += 1) {
+      const chunk = remapped.chunks[j];
+      lightweightChunks.push({
+        chunk_id: chunk.chunk_id,
+        session_id: chunk.session_id,
+        seq_in_session: chunk.seq_in_session,
+        start_offset: chunk.start_offset,
+        end_offset: chunk.end_offset,
+        kind: chunk.kind,
+        text_preview: makePreview(chunk.text),
+        text_ref: `${chunkTextShardPath}:${j + 1}`
+      });
+    }
 
     for (let j = 0; j < lightweightSessions.length; j += 1) {
       if (!lowMemoryMode || allSessions.length < LOW_MEMORY_MAX_SESSION_RECORDS) {
@@ -441,6 +464,10 @@ async function runPipeline({ file, settings }) {
   files.push({
     path: "local_memory/index/keyword_index.json",
     content: JSON.stringify(toKeywordMap(allConcepts), null, 2)
+  });
+  files.push({
+    path: "local_memory/index/chunk_text_shards.json",
+    content: JSON.stringify(chunkTextShardPaths, null, 2)
   });
 
   if (includeSymbolic) {
@@ -722,6 +749,9 @@ function makePreview(text) {
 function pause() {
   return new Promise((resolve) => setTimeout(resolve, 0));
 }
+
+
+
 
 
 
