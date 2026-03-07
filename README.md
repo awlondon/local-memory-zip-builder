@@ -40,10 +40,14 @@ local_memory/
   graph/
     edges_000001.jsonl
     concept_stats.jsonl
+  chunks/
+    chunk_text_part_000001.jsonl
+    chunk_text_part_000002.jsonl
   index/
     concept_index.json
     session_index.json
     keyword_index.json
+    chunk_text_shards.json
   instructions/
     README.txt
 ```
@@ -69,7 +73,9 @@ A workflow is already included at `.github/workflows/deploy-pages.yml`.
 - The pipeline is deterministic for the same file content + file metadata + settings.
 - ZIP entries use a fixed timestamp for stable output ordering.
 - Browser memory constraints still apply for very large files.
-- Large files are split and processed part-by-part to reduce memory spikes.`r`n- In low-memory mode for very large inputs, symbolic streams and per-session raw shard files may be skipped to prevent browser OOM. For extremely large files, raw input parts may also be omitted from the ZIP.
+- Large files are split and processed part-by-part to reduce memory spikes.
+- In low-memory mode for very large inputs, symbolic streams and per-session raw shard files may be skipped to prevent browser OOM. For extremely large files, raw input parts may also be omitted from the ZIP.
+- Full chunk text is still preserved in `local_memory/chunks/chunk_text_part_*.jsonl` for grounded retrieval.
 - Extremely large outputs can still take significant time during ZIP generation.
 - No external AI APIs or backend services are required.
 
@@ -79,6 +85,3 @@ The app tries to load JSZip from `./vendor/jszip.min.js` first, then falls back 
 `https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js`.
 
 For strict offline usage, place JSZip at `vendor/jszip.min.js`.
-
-
-

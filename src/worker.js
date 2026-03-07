@@ -125,6 +125,8 @@ async function runPipeline({ file, settings }) {
     );
   }
 
+  pushWarning("Full chunk text is preserved in local_memory/chunks/chunk_text_part_*.jsonl for grounded retrieval.");
+
   const files = [];
   const allSessions = [];
   const allChunks = [];
@@ -749,6 +751,7 @@ function makePreview(text) {
 function pause() {
   return new Promise((resolve) => setTimeout(resolve, 0));
 }
+
 
 
 

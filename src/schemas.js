@@ -92,6 +92,7 @@ export function buildInstructionsFile() {
     "2) Keep the local_memory/ directory intact (do not rename internal folders).",
     "3) Point your local coding or LLM agent at local_memory/.",
     "4) Ask the agent to read manifest/corpus.json and index/*.json before opening large raw shards.",
+    "4a) For grounded details, use chunks/chunk_text_part_*.jsonl via index/chunk_text_shards.json.",
     "5) Let the agent open raw session shards only for grounded span-level inspection.",
     "",
     "Notes:",
@@ -101,6 +102,3 @@ export function buildInstructionsFile() {
     "- For very large inputs, processing runs in sequential source parts; check generation_report.json source_parts for details."
   ].join("\n");
 }
-
-
-
