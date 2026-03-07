@@ -5,15 +5,11 @@ import { extractConcepts } from "./concepts.js";
 import { buildGraphArtifacts } from "./graph.js";
 import { buildSymbolicStreams } from "./symbolic.js";
 import { detectInputFormat, normalizeInputForRetrieval, rawInputShardPath } from "./ingest.js";
-import {
-  buildChunkManifest,
-  buildConceptIndex,
+import {  buildConceptIndex,
   buildCorpusManifest,
   buildGenerationReport,
   buildInstructionsFile,
-  buildSessionIndex,
-  buildSessionManifest
-} from "./schemas.js";
+  buildSessionIndex,} from "./schemas.js";
 import {
   asJsonl,
   createShards,
@@ -313,8 +309,8 @@ async function runPipeline({ file, settings }) {
 
   emitProgress("finalize", 0, "Preparing output files...");
 
-  const sessionManifestJsonl = buildSessionManifest(allSessions);
-  const chunkManifestJsonl = buildChunkManifest(allChunks);
+  const sessionManifestJsonl = buildJsonlPayload(allSessions);
+  const chunkManifestJsonl = buildJsonlPayload(allChunks);
 
   const corpusManifest = buildCorpusManifest(file.name, bytes, settings, {
     sessions: allSessions.length,
@@ -424,6 +420,38 @@ async function runPipeline({ file, settings }) {
   });
 }
 
+function buildJsonlPayload(records) {
+  if (!Array.isArray(records) || records.length === 0) {
+    return "";
+  }
+
+  // Small manifests can stay as plain strings for simpler downstream handling.
+  if (records.length <= 30000) {
+    return asJsonl(records);
+  }
+
+  // For very large manifests, avoid `Array.join` over huge arrays.
+  // Build buffered chunks and return a Blob to prevent "Invalid string length".
+  const blobParts = [];
+  let buffer = "";
+  const flushThreshold = 1_500_000;
+
+  for (let i = 0; i < records.length; i += 1) {
+    buffer += JSON.stringify(records[i]);
+    buffer += "\n";
+
+    if (buffer.length >= flushThreshold) {
+      blobParts.push(buffer);
+      buffer = "";
+    }
+  }
+
+  if (buffer.length > 0) {
+    blobParts.push(buffer);
+  }
+
+  return new Blob(blobParts, { type: "application/x-ndjson" });
+}
 function safePushEdge(target, edge, pushWarning, onCapReached) {
   if (target.length >= MAX_EDGES_TOTAL) {
     onCapReached();
@@ -648,3 +676,6 @@ function makePreview(text) {
 function pause() {
   return new Promise((resolve) => setTimeout(resolve, 0));
 }
+
+
+
