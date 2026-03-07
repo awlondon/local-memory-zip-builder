@@ -37,9 +37,14 @@ self.addEventListener("message", (event) => {
   }
 
   runPipeline(event.data).catch((error) => {
+    const message = error instanceof Error ? error.message : "Worker failed";
+    const stack = error instanceof Error && typeof error.stack === "string"
+      ? error.stack.split("\\n").slice(0, 4).join(" | ")
+      : null;
+
     self.postMessage({
       type: "error",
-      error: error instanceof Error ? error.message : "Worker failed"
+      error: stack ? `${message} (${stack})` : message
     });
   });
 });
@@ -192,11 +197,11 @@ async function runPipeline({ file, settings }) {
       previousLastChunkId = remapped.chunks[remapped.chunks.length - 1].chunk_id;
     }
 
-    allSessions.push(...remapped.sessions);
-    allChunks.push(...remapped.chunks);
-    allConcepts.push(...remapped.concepts);
-    allEdges.push(...partGraph.edges);
-    allConceptStats.push(...partGraph.conceptStats);
+    appendAll(allSessions, remapped.sessions);
+    appendAll(allChunks, remapped.chunks);
+    appendAll(allConcepts, remapped.concepts);
+    appendAll(allEdges, partGraph.edges);
+    appendAll(allConceptStats, partGraph.conceptStats);
 
     if (settings.includeSymbolic) {
       emitProgress("symbolic_streams", aggregatePartProgress(i, partPlan.length, 0), `Generating symbolic stream for ${partLabel}...`);
@@ -207,7 +212,7 @@ async function runPipeline({ file, settings }) {
           `Mapping glyph families for ${partLabel}...`
         );
       });
-      allSymbolicFiles.push(...partSymbolic);
+      appendAll(allSymbolicFiles, partSymbolic);
     }
 
     await pause();
@@ -293,10 +298,10 @@ async function runPipeline({ file, settings }) {
   }
 
   const conceptShards = createShards(allConcepts, "concepts", "local_memory/concepts", 2000);
-  files.push(...conceptShards);
+  appendAll(files, conceptShards);
 
   const edgeShards = createShards(allEdges, "edges", "local_memory/graph", 4000);
-  files.push(...edgeShards);
+  appendAll(files, edgeShards);
   files.push({ path: "local_memory/graph/concept_stats.jsonl", content: asJsonl(allConceptStats) });
 
   files.push({
@@ -313,7 +318,7 @@ async function runPipeline({ file, settings }) {
   });
 
   if (settings.includeSymbolic) {
-    files.push(...allSymbolicFiles);
+    appendAll(files, allSymbolicFiles);
   }
 
   files.push({
@@ -536,3 +541,5 @@ function roundMb(bytes) {
 function pause() {
   return new Promise((resolve) => setTimeout(resolve, 0));
 }
+
+
