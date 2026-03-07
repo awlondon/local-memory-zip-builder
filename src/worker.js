@@ -23,13 +23,22 @@ import {
   toKeywordMap
 } from "./utils.js";
 
-const PROCESSING_PART_BYTES = {
+const NORMAL_PART_BYTES = {
   text: 32 * 1024 * 1024,
   html: 20 * 1024 * 1024,
   json: 12 * 1024 * 1024
 };
 
+const LOW_MEMORY_PART_BYTES = {
+  text: 8 * 1024 * 1024,
+  html: 4 * 1024 * 1024,
+  json: 4 * 1024 * 1024
+};
+
+const LOW_MEMORY_THRESHOLD_BYTES = 220 * 1024 * 1024;
 const RAW_SHARD_COMPRESS_STORE_BYTES = 25 * 1024 * 1024;
+const MAX_EDGES_TOTAL = 500000;
+const CHUNK_PREVIEW_MAX = 260;
 
 self.addEventListener("message", (event) => {
   if (event.data?.type !== "start") {
@@ -39,7 +48,7 @@ self.addEventListener("message", (event) => {
   runPipeline(event.data).catch((error) => {
     const message = error instanceof Error ? error.message : "Worker failed";
     const stack = error instanceof Error && typeof error.stack === "string"
-      ? error.stack.split("\\n").slice(0, 4).join(" | ")
+      ? error.stack.split("\n").slice(0, 4).join(" | ")
       : null;
 
     self.postMessage({
@@ -50,6 +59,10 @@ self.addEventListener("message", (event) => {
 });
 
 async function runPipeline({ file, settings }) {
+  if (!file) {
+    throw new Error("No file provided.");
+  }
+
   const warnings = [];
   const limits = {
     browser_memory_bound: true,
@@ -57,18 +70,8 @@ async function runPipeline({ file, settings }) {
     processing_mode: "single"
   };
 
-  if (!file) {
-    throw new Error("No file provided.");
-  }
-
   const inputFormat = detectInputFormat(file.name, file.type);
   const bytes = file.size || 0;
-  const partByteSize = PROCESSING_PART_BYTES[inputFormat] || PROCESSING_PART_BYTES.text;
-  const partPlan = buildPartPlan(bytes, partByteSize);
-
-  limits.processing_part_size_mb = roundMb(partByteSize);
-  limits.processing_part_count = partPlan.length;
-  limits.processing_mode = partPlan.length > 1 ? "sequential_parts" : "single";
 
   const pushWarning = (warning) => {
     if (!warning || warnings.includes(warning)) {
@@ -78,12 +81,36 @@ async function runPipeline({ file, settings }) {
     self.postMessage({ type: "warning", warning });
   };
 
+  const lowMemoryMode = bytes >= LOW_MEMORY_THRESHOLD_BYTES;
+  const partByteSize = lowMemoryMode
+    ? (LOW_MEMORY_PART_BYTES[inputFormat] || LOW_MEMORY_PART_BYTES.text)
+    : (NORMAL_PART_BYTES[inputFormat] || NORMAL_PART_BYTES.text);
+
+  const partPlan = buildPartPlan(bytes, partByteSize);
+  limits.processing_part_size_mb = roundMb(partByteSize);
+  limits.processing_part_count = partPlan.length;
+  limits.processing_mode = partPlan.length > 1 ? "sequential_parts" : "single";
+  limits.low_memory_mode = lowMemoryMode;
+
+  if (lowMemoryMode) {
+    pushWarning(
+      `Low-memory mode enabled for ${(bytes / (1024 * 1024)).toFixed(0)} MB input. Using ${(partByteSize / (1024 * 1024)).toFixed(0)} MB parts and reduced in-memory payloads.`
+    );
+  }
+
   if (partPlan.length > 1) {
     pushWarning(
       `Input file split into ${partPlan.length} parts (~${roundMb(partByteSize)} MB each) and processed sequentially.`
     );
   }
 
+  const includeRaw = settings.includeRaw !== false;
+  const includeSessionRawShards = includeRaw && !lowMemoryMode;
+  if (includeRaw && !includeSessionRawShards) {
+    pushWarning("Session raw shard files are skipped in low-memory mode to prevent browser crashes. Original input parts are still included.");
+  }
+
+  const files = [];
   const allSessions = [];
   const allChunks = [];
   const allConcepts = [];
@@ -100,6 +127,7 @@ async function runPipeline({ file, settings }) {
   let previousLastSessionId = null;
   let previousLastChunkId = null;
   let globalOffsetBase = 0;
+  let edgeCapReached = false;
 
   for (let i = 0; i < partPlan.length; i += 1) {
     const part = partPlan[i];
@@ -184,10 +212,14 @@ async function runPipeline({ file, settings }) {
     );
 
     if (previousLastChunkId && remapped.chunks.length) {
-      allEdges.push({ src: previousLastChunkId, dst: remapped.chunks[0].chunk_id, type: "adjacent_to", weight: 1 });
+      safePushEdge(allEdges, { src: previousLastChunkId, dst: remapped.chunks[0].chunk_id, type: "adjacent_to", weight: 1 }, pushWarning, () => {
+        edgeCapReached = true;
+      });
     }
     if (previousLastSessionId && remapped.sessions.length) {
-      allEdges.push({ src: previousLastSessionId, dst: remapped.sessions[0].session_id, type: "continues", weight: 0.55 });
+      safePushEdge(allEdges, { src: previousLastSessionId, dst: remapped.sessions[0].session_id, type: "continues", weight: 0.55 }, pushWarning, () => {
+        edgeCapReached = true;
+      });
     }
 
     if (remapped.sessions.length) {
@@ -197,11 +229,58 @@ async function runPipeline({ file, settings }) {
       previousLastChunkId = remapped.chunks[remapped.chunks.length - 1].chunk_id;
     }
 
-    for (let j = 0; j < remapped.sessions.length; j += 1) { allSessions.push(remapped.sessions[j]); }
-    for (let j = 0; j < remapped.chunks.length; j += 1) { allChunks.push(remapped.chunks[j]); }
-    for (let j = 0; j < remapped.concepts.length; j += 1) { allConcepts.push(remapped.concepts[j]); }
-    for (let j = 0; j < partGraph.edges.length; j += 1) { allEdges.push(partGraph.edges[j]); }
-    for (let j = 0; j < partGraph.conceptStats.length; j += 1) { allConceptStats.push(partGraph.conceptStats[j]); }
+    if (includeSessionRawShards) {
+      for (let j = 0; j < remapped.sessions.length; j += 1) {
+        const session = remapped.sessions[j];
+        files.push({
+          path: `local_memory/raw/${session.session_id}.txt`,
+          content: session.text
+        });
+      }
+    }
+
+    const lightweightSessions = remapped.sessions.map((session) => ({
+      session_id: session.session_id,
+      title: session.title,
+      start_offset: session.start_offset,
+      end_offset: session.end_offset,
+      chunk_ids: session.chunk_ids,
+      concept_ids: session.concept_ids
+    }));
+
+    const lightweightChunks = remapped.chunks.map((chunk) => ({
+      chunk_id: chunk.chunk_id,
+      session_id: chunk.session_id,
+      seq_in_session: chunk.seq_in_session,
+      start_offset: chunk.start_offset,
+      end_offset: chunk.end_offset,
+      kind: chunk.kind,
+      text_preview: makePreview(chunk.text)
+    }));
+
+    for (let j = 0; j < lightweightSessions.length; j += 1) {
+      allSessions.push(lightweightSessions[j]);
+    }
+    for (let j = 0; j < lightweightChunks.length; j += 1) {
+      allChunks.push(lightweightChunks[j]);
+    }
+    for (let j = 0; j < remapped.concepts.length; j += 1) {
+      allConcepts.push(remapped.concepts[j]);
+    }
+
+    if (!edgeCapReached) {
+      for (let j = 0; j < partGraph.edges.length; j += 1) {
+        if (!safePushEdge(allEdges, partGraph.edges[j], pushWarning, () => {
+          edgeCapReached = true;
+        })) {
+          break;
+        }
+      }
+    }
+
+    for (let j = 0; j < partGraph.conceptStats.length; j += 1) {
+      allConceptStats.push(partGraph.conceptStats[j]);
+    }
 
     if (settings.includeSymbolic) {
       emitProgress("symbolic_streams", aggregatePartProgress(i, partPlan.length, 0), `Generating symbolic stream for ${partLabel}...`);
@@ -212,7 +291,10 @@ async function runPipeline({ file, settings }) {
           `Mapping glyph families for ${partLabel}...`
         );
       });
-      for (let j = 0; j < partSymbolic.length; j += 1) { allSymbolicFiles.push(partSymbolic[j]); }
+
+      for (let j = 0; j < partSymbolic.length; j += 1) {
+        allSymbolicFiles.push(partSymbolic[j]);
+      }
     }
 
     await pause();
@@ -230,8 +312,6 @@ async function runPipeline({ file, settings }) {
   emitProgress("symbolic_streams", 1, settings.includeSymbolic ? "Symbolic streams complete." : "Symbolic streams disabled.");
 
   emitProgress("finalize", 0, "Preparing output files...");
-
-  const files = [];
 
   const sessionManifestJsonl = buildSessionManifest(allSessions);
   const chunkManifestJsonl = buildChunkManifest(allChunks);
@@ -276,7 +356,7 @@ async function runPipeline({ file, settings }) {
   files.push({ path: "local_memory/manifest/chunks.jsonl", content: chunkManifestJsonl });
   files.push({ path: "local_memory/manifest/generation_report.json", content: JSON.stringify(generationReport, null, 2) });
 
-  if (settings.includeRaw !== false) {
+  if (includeRaw) {
     if (partPlan.length > 1) {
       files.push({
         path: "local_memory/raw/_original_split_note.txt",
@@ -289,19 +369,23 @@ async function runPipeline({ file, settings }) {
       });
     }
 
-    for (const session of allSessions) {
+    if (!includeSessionRawShards) {
       files.push({
-        path: `local_memory/raw/${session.session_id}.txt`,
-        content: session.text
+        path: "local_memory/raw/_session_shards_skipped.txt",
+        content: "Session raw shard files were skipped in low-memory mode for large input safety. Use input_parts/ plus manifests for retrieval."
       });
     }
   }
 
   const conceptShards = createShards(allConcepts, "concepts", "local_memory/concepts", 2000);
-  for (let j = 0; j < conceptShards.length; j += 1) { files.push(conceptShards[j]); }
+  for (let i = 0; i < conceptShards.length; i += 1) {
+    files.push(conceptShards[i]);
+  }
 
   const edgeShards = createShards(allEdges, "edges", "local_memory/graph", 4000);
-  for (let j = 0; j < edgeShards.length; j += 1) { files.push(edgeShards[j]); }
+  for (let i = 0; i < edgeShards.length; i += 1) {
+    files.push(edgeShards[i]);
+  }
   files.push({ path: "local_memory/graph/concept_stats.jsonl", content: asJsonl(allConceptStats) });
 
   files.push({
@@ -318,7 +402,9 @@ async function runPipeline({ file, settings }) {
   });
 
   if (settings.includeSymbolic) {
-    for (let j = 0; j < allSymbolicFiles.length; j += 1) { files.push(allSymbolicFiles[j]); }
+    for (let i = 0; i < allSymbolicFiles.length; i += 1) {
+      files.push(allSymbolicFiles[i]);
+    }
   }
 
   files.push({
@@ -328,16 +414,25 @@ async function runPipeline({ file, settings }) {
 
   emitProgress("finalize", 1, "Output files ready.");
 
-  const downloadName = makeDownloadName(file.name);
-
   self.postMessage({
     type: "complete",
     files,
     warnings,
-    downloadName,
+    downloadName: makeDownloadName(file.name),
     report: generationReport,
-    rawFilePlan: settings.includeRaw !== false ? buildRawFilePlan(partPlan, file.name, inputFormat) : []
+    rawFilePlan: includeRaw ? buildRawFilePlan(partPlan, file.name, inputFormat) : []
   });
+}
+
+function safePushEdge(target, edge, pushWarning, onCapReached) {
+  if (target.length >= MAX_EDGES_TOTAL) {
+    onCapReached();
+    pushWarning(`Edge cap reached at ${MAX_EDGES_TOTAL} records. Additional low-priority edges were omitted to keep memory bounded.`);
+    return false;
+  }
+
+  target.push(edge);
+  return true;
 }
 
 function emitProgress(stage, stageProgress, status) {
@@ -538,12 +633,18 @@ function roundMb(bytes) {
   return Math.round((bytes / (1024 * 1024)) * 10) / 10;
 }
 
+function makePreview(text) {
+  if (typeof text !== "string" || !text.length) {
+    return "";
+  }
+
+  if (text.length <= CHUNK_PREVIEW_MAX) {
+    return text;
+  }
+
+  return `${text.slice(0, CHUNK_PREVIEW_MAX - 3)}...`;
+}
+
 function pause() {
   return new Promise((resolve) => setTimeout(resolve, 0));
 }
-
-
-
-
-
-

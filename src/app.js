@@ -12,7 +12,7 @@ const STAGE_WEIGHTS = {
   archive_generation: 0.1
 };
 
-const WORKER_VERSION = "20260307-3";
+const WORKER_VERSION = "20260307-4";
 
 const STAGE_LABELS = {
   reading: "Reading input file...",
@@ -291,5 +291,6 @@ function tryLoadScript(src) {
     document.head.appendChild(script);
   });
 }
+
 
 

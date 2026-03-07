@@ -22,7 +22,7 @@ export function buildChunkManifest(chunks) {
       kind: chunk.kind,
       start_offset: chunk.start_offset,
       end_offset: chunk.end_offset,
-      text: chunk.text
+      text_preview: chunk.text_preview || ""
     }))
   );
 }
@@ -101,5 +101,6 @@ export function buildInstructionsFile() {
     "- For very large inputs, processing runs in sequential source parts; check generation_report.json source_parts for details."
   ].join("\n");
 }
+
 
 
