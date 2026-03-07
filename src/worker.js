@@ -4,6 +4,7 @@ import { chunkSessions } from "./chunker.js";
 import { extractConcepts } from "./concepts.js";
 import { buildGraphArtifacts } from "./graph.js";
 import { buildSymbolicStreams } from "./symbolic.js";
+import { detectInputFormat, normalizeInputForRetrieval, rawInputShardPath } from "./ingest.js";
 import {
   buildChunkManifest,
   buildConceptIndex,
@@ -53,18 +54,33 @@ async function runPipeline({ file, settings }) {
     warnings.push("Input file is larger than 80 MB. Consider splitting the source file if processing fails.");
   }
 
+  const pushWarning = (warning) => {
+    if (!warning || warnings.includes(warning)) {
+      return;
+    }
+    warnings.push(warning);
+    self.postMessage({ type: "warning", warning });
+  };
+
   emitProgress("reading", 0, "Reading input file...");
-  const text = await readTextFromFile(file, (fraction) => {
-    emitProgress("reading", fraction, "Reading input file...");
+  const rawInputText = await readTextFromFile(file, (fraction) => {
+    emitProgress("reading", fraction * 0.88, "Reading input file...");
   });
-  emitProgress("reading", 1, "Input file loaded.");
+
+  const inputFormat = detectInputFormat(file.name, file.type);
+  const retrievalText = normalizeInputForRetrieval(rawInputText, inputFormat, pushWarning);
+  emitProgress("reading", 1, "Input normalized for retrieval.");
+
+  if (!retrievalText) {
+    throw new Error("No retrievable text found after parsing input.");
+  }
 
   emitProgress("segmenting", 0, "Segmenting sessions...");
-  const blocks = parseTextToBlocks(text, (fraction) => {
+  const blocks = parseTextToBlocks(retrievalText, (fraction) => {
     emitProgress("segmenting", fraction * 0.45, "Parsing structural blocks...");
   });
 
-  const sessions = sessionizeBlocks(blocks, text, settings, (fraction) => {
+  const sessions = sessionizeBlocks(blocks, retrievalText, settings, (fraction) => {
     emitProgress("segmenting", 0.45 + fraction * 0.55, "Applying session boundary heuristics...");
   });
   emitProgress("segmenting", 1, "Sessions ready.");
@@ -140,8 +156,8 @@ async function runPipeline({ file, settings }) {
 
   if (settings.includeRaw !== false) {
     files.push({
-      path: "local_memory/raw/input_full.txt",
-      content: text
+      path: rawInputShardPath(file.name, inputFormat),
+      content: rawInputText
     });
 
     for (const session of sessions) {
@@ -264,4 +280,3 @@ function makeDownloadName(fileName) {
   const base = fileName.replace(/\.[^.]+$/, "").replace(/[^a-zA-Z0-9\-_]+/g, "_");
   return `${base || "local_memory"}_local_memory.zip`;
 }
-

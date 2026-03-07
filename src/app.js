@@ -49,12 +49,12 @@ async function startGeneration() {
 
   const file = ui.getSelectedFile();
   if (!file) {
-    ui.setStatus("Select a .txt file first.");
+    ui.setStatus("Select a .txt, .html, or .json file first.");
     return;
   }
 
-  if (!isLikelyTextFile(file)) {
-    ui.setStatus("Please choose a plain text (.txt) file.");
+  if (!isSupportedInputFile(file)) {
+    ui.setStatus("Please choose a supported text file (.txt, .html/.htm, or .json).");
     return;
   }
 
@@ -141,7 +141,11 @@ async function handleWorkerMessage(message) {
     const doneStatus = `Done. ${summary.total_sessions} sessions, ${summary.total_chunks} chunks, ${summary.total_concepts} concepts, ${summary.total_edges} edges.`;
 
     if (Array.isArray(message.warnings)) {
-      state.warnings.push(...message.warnings);
+      for (const warning of message.warnings) {
+        if (warning && !state.warnings.includes(warning)) {
+          state.warnings.push(warning);
+        }
+      }
     }
 
     ui.setWarnings(state.warnings);
@@ -220,12 +224,15 @@ function boundedProgress(value) {
   return Math.max(0, Math.min(1, number));
 }
 
-function isLikelyTextFile(file) {
+function isSupportedInputFile(file) {
   const lower = file.name.toLowerCase();
-  if (lower.endsWith(".txt") || lower.endsWith(".md") || lower.endsWith(".log")) {
+  const extensionSupported = [".txt", ".md", ".log", ".html", ".htm", ".json"].some((ext) => lower.endsWith(ext));
+  if (extensionSupported) {
     return true;
   }
-  return file.type.startsWith("text/");
+
+  const mime = (file.type || "").toLowerCase();
+  return mime.startsWith("text/") || mime.includes("json") || mime.includes("html");
 }
 
 async function ensureJsZipLoaded() {
@@ -254,3 +261,4 @@ function tryLoadScript(src) {
     document.head.appendChild(script);
   });
 }
+

@@ -12,18 +12,18 @@
       <p class="eyebrow">Client-side memory packaging</p>
       <h1>Local Memory ZIP Builder</h1>
       <p class="lead">
-        Upload one <code>.txt</code> file to generate a deterministic <code>local_memory/</code> archive for lazy retrieval by local agents.
+        Upload one <code>.txt</code>, <code>.html</code>, or <code>.json</code> file to generate a deterministic <code>local_memory/</code> archive for lazy retrieval by local agents.
       </p>
     </header>
 
     <section class="card">
       <h2>Input</h2>
       <p class="help">
-        Drag and drop a text file, or choose one manually. Processing runs in a Web Worker to keep the UI responsive.
+        Drag and drop a text/HTML/JSON file, or choose one manually. Processing runs in a Web Worker to keep the UI responsive.
       </p>
-      <div id="drop-zone" class="drop-zone" tabindex="0" role="button" aria-label="Drop a text file here">
-        <p id="drop-label">Drop .txt file here or click to browse</p>
-        <input id="file-input" type="file" accept=".txt,text/plain" hidden>
+      <div id="drop-zone" class="drop-zone" tabindex="0" role="button" aria-label="Drop a text, HTML, or JSON file here">
+        <p id="drop-label">Drop .txt, .html, or .json file here or click to browse</p>
+        <input id="file-input" type="file" accept=".txt,.md,.log,.html,.htm,.json,text/plain,text/html,application/json" hidden>
       </div>
       <p id="selected-file" class="meta">No file selected.</p>
     </section>
@@ -95,3 +95,4 @@
   <script type="module" src="./src/app.js"></script>
 </body>
 </html>
+

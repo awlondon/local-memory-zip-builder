@@ -1,10 +1,11 @@
 # Local Memory ZIP Builder
 
-A GitHub Pages-compatible browser app that converts a large `.txt` document into a deterministic `local_memory/` retrieval archive and downloads it as a ZIP.
+A GitHub Pages-compatible browser app that converts a `.txt`, `.html`, or `.json` document into a deterministic `local_memory/` retrieval archive and downloads it as a ZIP.
 
 ## What it does
 
 - Runs fully client-side (HTML/CSS/vanilla JS)
+- Accepts `.txt`, `.html/.htm`, and `.json` input
 - Uses a Web Worker for heavy processing
 - Sessionizes and chunks text using deterministic heuristics
 - Extracts recurring concepts and concept/chunk/session links
@@ -24,7 +25,7 @@ local_memory/
     chunks.jsonl
     generation_report.json
   raw/
-    input_full.txt
+    input_full.txt / input_full.html / input_full.json
     sess_000001.txt
     ...
   symbolic/
@@ -48,7 +49,7 @@ local_memory/
 
 1. Serve the repository with a static server (or use GitHub Pages).
 2. Open `index.html` in the browser.
-3. Upload a text file and click **Generate ZIP**.
+3. Upload a `.txt`, `.html`, or `.json` file and click **Generate ZIP**.
 4. Download and unzip the archive.
 
 ## GitHub Pages deployment
@@ -73,3 +74,6 @@ The app tries to load JSZip from `./vendor/jszip.min.js` first, then falls back 
 `https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js`.
 
 For strict offline usage, place JSZip at `vendor/jszip.min.js`.
+
+
+
