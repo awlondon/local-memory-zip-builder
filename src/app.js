@@ -33,7 +33,8 @@ const state = {
   worker: null,
   stageProgress: Object.create(null),
   objectUrl: null,
-  warnings: []
+  warnings: [],
+  inputFile: null
 };
 
 ui.onGenerate(() => {
@@ -64,6 +65,7 @@ async function startGeneration() {
   state.running = true;
   state.startedAt = performance.now();
   state.warnings = [];
+  state.inputFile = file;
   ui.setBusy(true);
   ui.setProgress(0, STAGE_LABELS.reading);
   ui.setTiming(0, Number.NaN);
@@ -114,8 +116,10 @@ async function handleWorkerMessage(message) {
   }
 
   if (message.type === "warning") {
-    state.warnings.push(message.warning);
-    ui.setWarnings(state.warnings);
+    if (message.warning && !state.warnings.includes(message.warning)) {
+      state.warnings.push(message.warning);
+      ui.setWarnings(state.warnings);
+    }
     return;
   }
 
@@ -123,7 +127,18 @@ async function handleWorkerMessage(message) {
     state.stageProgress.finalize = 1;
     ui.setProgress(computeOverallProgress() * 100, STAGE_LABELS.archive_generation);
 
-    const zipBlob = await createZipBlob(message.files, (archiveProgress) => {
+    const filesForZip = [...(message.files || [])];
+    if (message.rawInputPath && state.inputFile) {
+      filesForZip.push({
+        path: message.rawInputPath,
+        content: state.inputFile,
+        options: {
+          compression: state.inputFile.size > 25 * 1024 * 1024 ? "STORE" : "DEFLATE"
+        }
+      });
+    }
+
+    const zipBlob = await createZipBlob(filesForZip, (archiveProgress) => {
       state.stageProgress.archive_generation = boundedProgress(archiveProgress);
       const overall = computeOverallProgress();
       ui.setProgress(overall * 100, STAGE_LABELS.archive_generation);
@@ -188,6 +203,7 @@ function failGeneration(error) {
 function resetRunState() {
   state.stageProgress = Object.create(null);
   state.warnings = [];
+  state.inputFile = null;
   ui.setWarnings([]);
   ui.setDownload(null, null);
 }
@@ -261,4 +277,3 @@ function tryLoadScript(src) {
     document.head.appendChild(script);
   });
 }
-

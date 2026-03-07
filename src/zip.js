@@ -8,11 +8,14 @@ export async function createZipBlob(files, onProgress) {
   const zip = new window.JSZip();
 
   for (const entry of files) {
-    zip.file(entry.path, entry.content, {
-      binary: false,
+    const fileOptions = {
+      binary: typeof entry.content !== "string",
       createFolders: true,
-      date: DETERMINISTIC_DATE
-    });
+      date: DETERMINISTIC_DATE,
+      ...(entry.options || {})
+    };
+
+    zip.file(entry.path, entry.content, fileOptions);
   }
 
   return zip.generateAsync(

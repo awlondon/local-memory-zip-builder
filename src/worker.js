@@ -22,6 +22,14 @@ import {
   toKeywordMap
 } from "./utils.js";
 
+const RETRIEVAL_BYTE_LIMITS = {
+  text: 48 * 1024 * 1024,
+  html: 24 * 1024 * 1024,
+  json: 16 * 1024 * 1024
+};
+
+const MAX_ORIGINAL_RAW_INCLUDE_BYTES = 180 * 1024 * 1024;
+
 self.addEventListener("message", (event) => {
   if (event.data?.type !== "start") {
     return;
@@ -39,20 +47,16 @@ async function runPipeline({ file, settings }) {
   const warnings = [];
   const limits = {
     browser_memory_bound: true,
-    max_tested_text_size_mb: 120
+    max_tested_text_size_mb: 120,
+    retrieval_window_limit_mb: 0
   };
 
   if (!file) {
     throw new Error("No file provided.");
   }
 
+  const inputFormat = detectInputFormat(file.name, file.type);
   const bytes = file.size || 0;
-  if (bytes > 25 * 1024 * 1024) {
-    warnings.push("Input file is larger than 25 MB. Browser memory pressure may increase.");
-  }
-  if (bytes > 80 * 1024 * 1024) {
-    warnings.push("Input file is larger than 80 MB. Consider splitting the source file if processing fails.");
-  }
 
   const pushWarning = (warning) => {
     if (!warning || warnings.includes(warning)) {
@@ -62,13 +66,27 @@ async function runPipeline({ file, settings }) {
     self.postMessage({ type: "warning", warning });
   };
 
+  if (bytes > 80 * 1024 * 1024) {
+    pushWarning("Large file detected. Processing uses a bounded retrieval window to avoid browser memory failures.");
+  }
+
   emitProgress("reading", 0, "Reading input file...");
-  const rawInputText = await readTextFromFile(file, (fraction) => {
-    emitProgress("reading", fraction * 0.88, "Reading input file...");
+
+  const retrievalLimitBytes = RETRIEVAL_BYTE_LIMITS[inputFormat] || RETRIEVAL_BYTE_LIMITS.text;
+  limits.retrieval_window_limit_mb = Math.round((retrievalLimitBytes / (1024 * 1024)) * 10) / 10;
+
+  const retrievalRead = await readTextWindowFromFile(file, retrievalLimitBytes, (fraction) => {
+    emitProgress("reading", fraction * 0.88, "Reading retrieval window...");
   });
 
-  const inputFormat = detectInputFormat(file.name, file.type);
-  const retrievalText = normalizeInputForRetrieval(rawInputText, inputFormat, pushWarning);
+  if (retrievalRead.truncated) {
+    const limitMb = (retrievalLimitBytes / (1024 * 1024)).toFixed(0);
+    pushWarning(
+      `Retrieval analysis used the first ${limitMb} MB only (${inputFormat} window). Split very large inputs for full-coverage indexing.`
+    );
+  }
+
+  const retrievalText = normalizeInputForRetrieval(retrievalRead.text, inputFormat, pushWarning);
   emitProgress("reading", 1, "Input normalized for retrieval.");
 
   if (!retrievalText) {
@@ -133,6 +151,10 @@ async function runPipeline({ file, settings }) {
     edges: edges.length
   });
 
+  corpusManifest.input_format = inputFormat;
+  corpusManifest.retrieval_window_bytes = retrievalLimitBytes;
+  corpusManifest.retrieval_window_truncated = retrievalRead.truncated;
+
   const deterministicTimestamp = deterministicTimestampFromFile(file);
   const estimatedDurationMs = estimateDeterministicDurationMs(bytes, sessions.length, chunks.length);
 
@@ -149,16 +171,30 @@ async function runPipeline({ file, settings }) {
     limits
   });
 
+  generationReport.retrieval_window = {
+    input_format: inputFormat,
+    byte_limit: retrievalLimitBytes,
+    bytes_loaded: retrievalRead.bytesLoaded,
+    truncated: retrievalRead.truncated
+  };
+
   files.push({ path: "local_memory/manifest/corpus.json", content: JSON.stringify(corpusManifest, null, 2) });
   files.push({ path: "local_memory/manifest/sessions.jsonl", content: sessionManifestJsonl });
   files.push({ path: "local_memory/manifest/chunks.jsonl", content: chunkManifestJsonl });
   files.push({ path: "local_memory/manifest/generation_report.json", content: JSON.stringify(generationReport, null, 2) });
 
   if (settings.includeRaw !== false) {
-    files.push({
-      path: rawInputShardPath(file.name, inputFormat),
-      content: rawInputText
-    });
+    if (bytes > MAX_ORIGINAL_RAW_INCLUDE_BYTES) {
+      pushWarning(
+        `Original source file not embedded in ZIP because it exceeds ${(MAX_ORIGINAL_RAW_INCLUDE_BYTES / (1024 * 1024)).toFixed(0)} MB. ` +
+          "Session shards and retrieval manifests are included; split source files for full lossless packaging."
+      );
+    } else {
+      files.push({
+        path: "local_memory/raw/_original_file_note.txt",
+        content: "Original source file is included as input_full.* in this folder."
+      });
+    }
 
     for (const session of sessions) {
       files.push({
@@ -199,12 +235,17 @@ async function runPipeline({ file, settings }) {
 
   const downloadName = makeDownloadName(file.name);
 
+  const rawInputPath = settings.includeRaw !== false && bytes <= MAX_ORIGINAL_RAW_INCLUDE_BYTES
+    ? rawInputShardPath(file.name, inputFormat)
+    : null;
+
   self.postMessage({
     type: "complete",
     files,
     warnings,
     downloadName,
-    report: generationReport
+    report: generationReport,
+    rawInputPath
   });
 }
 
@@ -217,17 +258,29 @@ function emitProgress(stage, stageProgress, status) {
   });
 }
 
-async function readTextFromFile(file, onProgress) {
+async function readTextWindowFromFile(file, maxBytes, onProgress) {
+  const safeMax = Math.max(1, maxBytes || file.size || 1);
+
   const streamFn = file.stream?.bind(file);
   if (!streamFn) {
-    onProgress(1);
-    return file.text();
+    const blob = file.size > safeMax ? file.slice(0, safeMax) : file;
+    const text = await blob.text();
+    if (typeof onProgress === "function") {
+      onProgress(1);
+    }
+    return {
+      text,
+      bytesLoaded: blob.size,
+      truncated: file.size > blob.size
+    };
   }
 
   const reader = streamFn().getReader();
   const decoder = new TextDecoder("utf-8");
   const chunks = [];
-  let loaded = 0;
+  let loadedBytes = 0;
+  let collectedBytes = 0;
+  let truncated = false;
 
   while (true) {
     const { done, value } = await reader.read();
@@ -235,21 +288,43 @@ async function readTextFromFile(file, onProgress) {
       break;
     }
 
-    loaded += value.byteLength;
-    chunks.push(decoder.decode(value, { stream: true }));
+    loadedBytes += value.byteLength;
+
+    if (collectedBytes < safeMax) {
+      const remaining = safeMax - collectedBytes;
+      const slice = value.byteLength > remaining ? value.subarray(0, remaining) : value;
+      collectedBytes += slice.byteLength;
+      chunks.push(decoder.decode(slice, { stream: true }));
+
+      if (slice.byteLength < value.byteLength) {
+        truncated = true;
+        break;
+      }
+    } else {
+      truncated = true;
+      break;
+    }
 
     if (typeof onProgress === "function") {
-      onProgress(Math.min(1, loaded / Math.max(1, file.size || loaded)));
+      onProgress(Math.min(1, loadedBytes / Math.max(1, file.size || loadedBytes)));
     }
   }
 
   chunks.push(decoder.decode());
 
-  if (typeof onProgress === "function") {
-    onProgress(1);
+  if (!truncated && file.size > collectedBytes) {
+    truncated = true;
   }
 
-  return chunks.join("");
+  if (typeof onProgress === "function") {
+    onProgress(truncated ? Math.min(1, collectedBytes / Math.max(1, file.size || collectedBytes)) : 1);
+  }
+
+  return {
+    text: chunks.join(""),
+    bytesLoaded: collectedBytes,
+    truncated
+  };
 }
 
 function attachSessionConcepts(sessions, chunks, chunkConcepts) {

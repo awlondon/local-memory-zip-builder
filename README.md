@@ -66,6 +66,8 @@ A workflow is already included at `.github/workflows/deploy-pages.yml`.
 - The pipeline is deterministic for the same file content + file metadata + settings.
 - ZIP entries use a fixed timestamp for stable output ordering.
 - Browser memory constraints still apply for very large files.
+- For very large HTML/JSON inputs, indexing uses a bounded retrieval window to avoid browser crashes (reported in generation report warnings).
+- Extremely large originals may be omitted from ZIP embedding; split files for full lossless packaging.
 - No external AI APIs or backend services are required.
 
 ## JSZip
@@ -74,6 +76,3 @@ The app tries to load JSZip from `./vendor/jszip.min.js` first, then falls back 
 `https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js`.
 
 For strict offline usage, place JSZip at `vendor/jszip.min.js`.
-
-
-

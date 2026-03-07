@@ -97,6 +97,7 @@ export function buildInstructionsFile() {
     "Notes:",
     "- This archive is retrieval-oriented metadata, not a fine-tuning dataset.",
     "- symbolic/*.stream.jsonl is a lightweight contour and should not be treated as complete truth.",
-    "- Browser memory limits still apply for very large text files."
+    "- Browser memory limits still apply for very large files.",
+    "- For very large HTML/JSON inputs, retrieval indexing may use a bounded window; check generation_report.json warnings."
   ].join("\n");
 }
