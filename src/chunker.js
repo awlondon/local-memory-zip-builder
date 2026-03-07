@@ -1,4 +1,4 @@
-import { clamp, makeId, normalizeWhitespace, splitSentencesWithOffsets } from "./utils.js";
+﻿import { clamp, makeId, normalizeWhitespace, splitSentencesWithOffsets, takeLeadingWords, uniqueStrings } from "./utils.js";
 
 const CHUNK_SIZE_PROFILE = {
   small: { min: 120, target: 250, max: 420 },
@@ -34,6 +34,9 @@ export function chunkSessions(sessions, settings, onProgress = () => {}) {
         return;
       }
 
+      const sourceBlockTypes = uniqueStrings(currentUnits.map((unit) => unit.block_type));
+      const artifactType = classifyArtifactType(text, currentUnits, sourceBlockTypes);
+      const artifactLabel = artifactType ? extractArtifactLabel(text, artifactType) : null;
       const chunkId = makeId("chunk", chunkCounter++);
       const chunk = {
         chunk_id: chunkId,
@@ -42,7 +45,10 @@ export function chunkSessions(sessions, settings, onProgress = () => {}) {
         start_offset: start,
         end_offset: end,
         text,
-        kind: classifyChunk(text, currentUnits)
+        kind: classifyChunk(text, currentUnits),
+        source_block_types: sourceBlockTypes,
+        artifact_type: artifactType,
+        artifact_label: artifactLabel
       };
 
       chunks.push(chunk);
@@ -92,7 +98,14 @@ function unitsFromSessionBlocks(blocks, profile) {
       continue;
     }
 
-    if (block.type === "code" || block.type === "quote" || text.length <= profile.target * 1.5) {
+    if (
+      block.type === "code" ||
+      block.type === "quote" ||
+      block.type === "table" ||
+      block.type === "json" ||
+      block.type === "section" ||
+      text.length <= profile.target * 1.5
+    ) {
       units.push({
         text,
         start_offset: block.start_offset,
@@ -147,6 +160,51 @@ function classifyChunk(text, units) {
   return "statement";
 }
 
+function classifyArtifactType(text, units, sourceBlockTypes) {
+  if (sourceBlockTypes.includes("code")) {
+    return "code";
+  }
+
+  if (sourceBlockTypes.includes("table") || looksLikeTable(text)) {
+    return "table";
+  }
+
+  if (sourceBlockTypes.includes("json") || looksLikeJson(text)) {
+    return "json_object";
+  }
+
+  if (sourceBlockTypes.includes("section") || looksLikeDocumentSection(text)) {
+    return "document_section";
+  }
+
+  return null;
+}
+
+function extractArtifactLabel(text, artifactType) {
+  if (artifactType === "code") {
+    const codeMatch = text.match(/\b(?:function|class|interface|type|const|let|var|export\s+function|export\s+class)\s+([A-Za-z_][A-Za-z0-9_]*)/);
+    if (codeMatch) {
+      return codeMatch[1];
+    }
+  }
+
+  if (artifactType === "json_object") {
+    const keys = [...text.matchAll(/"([^"\\]{1,40})"\s*:/g)].map((match) => match[1]);
+    if (keys.length) {
+      return keys.slice(0, 4).join(" ");
+    }
+  }
+
+  if (artifactType === "document_section") {
+    const headingMatch = text.match(/^(?:#{1,6}\s+)?((?:chapter|section|part|appendix)\s+[A-Za-z0-9._:-]+[^.!?\n]{0,80})/i);
+    if (headingMatch) {
+      return normalizeWhitespace(headingMatch[1]);
+    }
+  }
+
+  return takeLeadingWords(text, artifactType === "table" ? 10 : 12) || normalizeWhitespace(text).slice(0, 80);
+}
+
 function looksLikeBoundary(text) {
   const lower = text.toLowerCase();
   return /\b(however|therefore|in summary|finally|next,|next step|conclusion)\b/.test(lower);
@@ -154,4 +212,16 @@ function looksLikeBoundary(text) {
 
 function looksComplete(text) {
   return /[.!?)]$/.test(text.trim());
+}
+
+function looksLikeTable(text) {
+  return /\|/.test(text) || /\b[a-z0-9_]+\s*,\s*[a-z0-9_]+\s*,\s*[a-z0-9_]+/i.test(text);
+}
+
+function looksLikeJson(text) {
+  return /^[\[{]/.test(text.trim()) || /"[^"\\]{1,40}"\s*:/.test(text);
+}
+
+function looksLikeDocumentSection(text) {
+  return /^(?:#{1,6}\s+)?(?:chapter|section|part|appendix)\b/i.test(text) || /^[A-Z0-9][A-Z0-9\s:._\-/]{6,90}$/.test(text.trim());
 }

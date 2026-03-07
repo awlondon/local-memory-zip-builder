@@ -1,4 +1,4 @@
-function formatBytes(bytes) {
+﻿function formatBytes(bytes) {
   if (!Number.isFinite(bytes) || bytes <= 0) {
     return "0 B";
   }
@@ -33,6 +33,8 @@ export function createUIController() {
     sessionSize: document.getElementById("session-size"),
     conceptAggressiveness: document.getElementById("concept-aggressiveness"),
     includeSymbolic: document.getElementById("include-symbolic"),
+    includeTextpack: document.getElementById("include-textpack"),
+    includeLegacyChunkText: document.getElementById("include-legacy-chunk-text"),
     includeRaw: document.getElementById("include-raw"),
     generateBtn: document.getElementById("generate-btn"),
     downloadBtn: document.getElementById("download-btn"),
@@ -100,6 +102,9 @@ export function createUIController() {
     elements.sessionSize.disabled = busy;
     elements.conceptAggressiveness.disabled = busy;
     elements.includeSymbolic.disabled = busy;
+    elements.includeTextpack.disabled = busy;
+    elements.includeLegacyChunkText.disabled = busy;
+    elements.includeRaw.disabled = busy;
     elements.fileInput.disabled = busy;
     elements.dropZone.classList.toggle("disabled", busy);
   }
@@ -153,7 +158,10 @@ export function createUIController() {
       sessionSize: elements.sessionSize.value,
       conceptAggressiveness: elements.conceptAggressiveness.value,
       includeSymbolic: elements.includeSymbolic.checked,
-      includeRaw: elements.includeRaw.checked
+      includeTextpack: elements.includeTextpack.checked,
+      includeLegacyChunkText: elements.includeLegacyChunkText.checked,
+      includeRaw: elements.includeRaw.checked,
+      enableDeltaEncoding: true
     };
   }
 

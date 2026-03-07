@@ -1,4 +1,4 @@
-import { asJsonl } from "./utils.js";
+﻿import { asJsonl } from "./utils.js";
 
 export function buildSessionManifest(sessions) {
   return asJsonl(
@@ -22,7 +22,10 @@ export function buildChunkManifest(chunks) {
       kind: chunk.kind,
       start_offset: chunk.start_offset,
       end_offset: chunk.end_offset,
-      text_preview: chunk.text_preview || ""
+      text_preview: chunk.text_preview || "",
+      text_ref: chunk.text_ref || null,
+      artifact_type: chunk.artifact_type || null,
+      artifact_label: chunk.artifact_label || null
     }))
   );
 }
@@ -64,7 +67,8 @@ export function buildCorpusManifest(inputFileName, byteLength, settings, counter
       sessions: counters.sessions,
       chunks: counters.chunks,
       concepts: counters.concepts,
-      edges: counters.edges
+      edges: counters.edges,
+      artifact_versions: counters.artifact_versions || 0
     }
   };
 }
@@ -78,9 +82,22 @@ export function buildGenerationReport(payload) {
     total_chunks: payload.totalChunks,
     total_concepts: payload.totalConcepts,
     total_edges: payload.totalEdges,
+    total_artifact_versions: payload.totalArtifactVersions || 0,
     estimated_processing_duration_ms: payload.estimatedDurationMs,
     warnings: payload.warnings,
-    limits: payload.limits
+    limits: payload.limits,
+    textpack: payload.textpack || null
+  };
+}
+
+export function buildTextpackManifest(payload) {
+  return {
+    version: payload.version,
+    encoding: payload.encoding,
+    shards: payload.shards,
+    dictionary: payload.dictionary,
+    delta: payload.delta,
+    stats: payload.stats
   };
 }
 
@@ -91,13 +108,14 @@ export function buildInstructionsFile() {
     "1) Unzip this archive locally.",
     "2) Keep the local_memory/ directory intact (do not rename internal folders).",
     "3) Point your local coding or LLM agent at local_memory/.",
-    "4) Ask the agent to read manifest/corpus.json and index/*.json before opening large raw shards.",
-    "4a) For grounded details, use chunks/chunk_text_part_*.jsonl via index/chunk_text_shards.json.",
-    "5) Let the agent open raw session shards only for grounded span-level inspection.",
+    "4) Ask the agent to read manifest/corpus.json and index/*.json before opening large payload shards.",
+    "5) Prefer symbolic/*.stream.jsonl for fast retrieval cues and textpack/ for exact chunk reconstruction.",
+    "6) Use chunks/chunk_text_part_*.jsonl only as a compatibility fallback during the rollout window.",
+    "7) Let the agent open raw session shards only for grounded span-level inspection when they are present.",
     "",
     "Notes:",
     "- This archive is retrieval-oriented metadata, not a fine-tuning dataset.",
-    "- symbolic/*.stream.jsonl is a lightweight contour and should not be treated as complete truth.",
+    "- symbolic/*.stream.jsonl is a retrieval contour with textpack references; reconstruction should come from textpack/.",
     "- Browser memory limits still apply for very large files.",
     "- For very large inputs, processing runs in sequential source parts; check generation_report.json source_parts for details."
   ].join("\n");

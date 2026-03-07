@@ -1,10 +1,17 @@
-import { clamp, jaccardFromSets, tokenizeForSimilarity } from "./utils.js";
+﻿import { clamp, jaccardFromSets, tokenizeForSimilarity } from "./utils.js";
 
 export function buildGraphArtifacts(payload, onProgress = () => {}) {
-  const { sessions, chunks, concepts, chunkConcepts } = payload;
+  const { sessions, chunks, concepts, chunkConcepts, artifacts = [] } = payload;
 
   const chunkById = new Map(chunks.map((chunk) => [chunk.chunk_id, chunk]));
-  const conceptById = new Map(concepts.map((concept) => [concept.concept_id, concept]));
+  const artifactByChunkId = new Map(artifacts.map((artifact) => [artifact.chunk_id, artifact]));
+  const artifactVersionsByArtifactId = new Map();
+  for (const artifact of artifacts) {
+    if (!artifactVersionsByArtifactId.has(artifact.artifact_id)) {
+      artifactVersionsByArtifactId.set(artifact.artifact_id, []);
+    }
+    artifactVersionsByArtifactId.get(artifact.artifact_id).push(artifact);
+  }
 
   const edges = [];
   const seen = new Set();
@@ -30,9 +37,14 @@ export function buildGraphArtifacts(payload, onProgress = () => {}) {
       const relationType = i === 0 ? "primary_topic_of" : "mentioned_in";
       const relationWeight = i === 0 ? 0.65 + link.score * 0.05 : 0.4 + link.score * 0.04;
       addEdge(link.concept_id, chunk.chunk_id, relationType, relationWeight);
+
+      const artifactVersion = artifactByChunkId.get(chunk.chunk_id);
+      if (artifactVersion) {
+        addEdge(link.concept_id, artifactVersion.artifact_version_id, "mentioned_in_artifact", 0.42 + link.score * 0.04);
+      }
     }
   }
-  onProgress(0.25);
+  onProgress(0.2);
 
   for (const session of sessions) {
     for (let i = 1; i < session.chunk_ids.length; i += 1) {
@@ -55,7 +67,7 @@ export function buildGraphArtifacts(payload, onProgress = () => {}) {
       }
     }
   }
-  onProgress(0.45);
+  onProgress(0.4);
 
   const sessionConceptSets = new Map();
   for (const session of sessions) {
@@ -77,29 +89,30 @@ export function buildGraphArtifacts(payload, onProgress = () => {}) {
     if (overlap >= 0.2) {
       addEdge(previous.session_id, current.session_id, "same_theme_as", 0.42 + overlap);
     }
+  }
+  onProgress(0.58);
 
-    if (i > 1) {
-      let bestMatch = null;
-      let bestOverlap = 0;
-      for (let j = i - 2; j >= 0; j -= 1) {
-        const candidate = sessions[j];
-        const candidateOverlap = setOverlapRatio(
-          sessionConceptSets.get(candidate.session_id),
-          sessionConceptSets.get(current.session_id)
+  for (const artifactVersions of artifactVersionsByArtifactId.values()) {
+    artifactVersions.sort((a, b) => a.version_index - b.version_index || a.chunk_id.localeCompare(b.chunk_id));
+
+    for (let index = 0; index < artifactVersions.length; index += 1) {
+      const artifact = artifactVersions[index];
+      addEdge(artifact.artifact_id, artifact.artifact_version_id, "contains", 0.97);
+      addEdge(artifact.artifact_version_id, artifact.artifact_id, "revision_of", 0.94);
+      addEdge(artifact.artifact_version_id, artifact.chunk_id, "materialized_as", 0.99);
+      addEdge(artifact.session_id, artifact.artifact_id, "contains", 0.76);
+
+      if (index > 0) {
+        const previousVersion = artifactVersions[index - 1];
+        const similarity = jaccardFromSets(
+          tokenizeForSimilarity(chunkById.get(previousVersion.chunk_id)?.text || ""),
+          tokenizeForSimilarity(chunkById.get(artifact.chunk_id)?.text || "")
         );
-
-        if (candidateOverlap > bestOverlap) {
-          bestOverlap = candidateOverlap;
-          bestMatch = candidate;
-        }
-      }
-
-      if (bestMatch && bestOverlap >= 0.28) {
-        addEdge(current.session_id, bestMatch.session_id, "revisits", 0.4 + bestOverlap);
+        addEdge(artifact.artifact_version_id, previousVersion.artifact_version_id, "derived_from", 0.48 + similarity * 0.45);
       }
     }
   }
-  onProgress(0.65);
+  onProgress(0.72);
 
   const conceptPairs = [];
   for (let i = 0; i < concepts.length; i += 1) {
@@ -130,15 +143,8 @@ export function buildGraphArtifacts(payload, onProgress = () => {}) {
       addEdge(conceptB.concept_id, conceptA.concept_id, "subconcept_of", 0.65);
     }
 
-    if (
-      /\b(vs|versus|tradeoff|not)\b/i.test(conceptA.label) &&
-      /\b(vs|versus|tradeoff|not)\b/i.test(conceptB.label)
-    ) {
-      addEdge(conceptA.concept_id, conceptB.concept_id, "contrasts_with", 0.45);
-    }
-
     if ((i + 1) % 400 === 0 || i === conceptPairs.length - 1) {
-      onProgress(0.65 + 0.35 * ((i + 1) / Math.max(1, conceptPairs.length)));
+      onProgress(0.72 + 0.28 * ((i + 1) / Math.max(1, conceptPairs.length)));
     }
   }
 
@@ -158,13 +164,15 @@ export function buildGraphArtifacts(payload, onProgress = () => {}) {
     const conceptEdgesOnly = conceptEdges.filter(
       (edge) => edge.src.startsWith("concept_") && edge.dst.startsWith("concept_")
     );
+    const artifactEdges = conceptEdges.filter((edge) => edge.dst.startsWith("artifact_version_"));
 
     return {
       concept_id: concept.concept_id,
       label: concept.label,
       degree_total: conceptEdges.length,
       chunk_degree: chunkEdges.length,
-      concept_degree: conceptEdgesOnly.length
+      concept_degree: conceptEdgesOnly.length,
+      artifact_degree: artifactEdges.length
     };
   });
 

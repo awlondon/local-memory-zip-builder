@@ -1,4 +1,4 @@
-<!doctype html>
+﻿<!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8">
@@ -12,7 +12,7 @@
       <p class="eyebrow">Client-side memory packaging</p>
       <h1>Local Memory ZIP Builder</h1>
       <p class="lead">
-        Upload one <code>.txt</code>, <code>.html</code>, or <code>.json</code> file to generate a deterministic <code>local_memory/</code> archive for lazy retrieval by local agents.
+        Upload one <code>.txt</code>, <code>.html</code>, or <code>.json</code> file to generate a deterministic <code>local_memory/</code> archive with symbolic streams, textpack reconstruction, and compatibility shards for local agents.
       </p>
     </header>
 
@@ -55,8 +55,18 @@
         </label>
 
         <label class="checkbox">
-          <input id="include-raw" type="checkbox" checked disabled>
-          Include raw session shards (always on in V1)
+          <input id="include-textpack" type="checkbox" checked>
+          Include textpack reconstruction layer
+        </label>
+
+        <label class="checkbox">
+          <input id="include-legacy-chunk-text" type="checkbox" checked>
+          Include legacy chunk text shards
+        </label>
+
+        <label class="checkbox">
+          <input id="include-raw" type="checkbox" checked>
+          Include raw session/input shards
         </label>
       </div>
     </section>
@@ -87,12 +97,11 @@
         <li>Unarchive it locally.</li>
         <li>Keep the resulting <code>local_memory/</code> directory intact.</li>
         <li>Point your local LLM/coding agent at that directory.</li>
-        <li>Have the agent read manifests and indices first, then open raw shards only as needed.</li>
+        <li>Have the agent read manifests and indices first, then use <code>symbolic/</code> and <code>textpack/</code> before raw shards.</li>
       </ol>
     </section>
   </main>
 
-  <script type="module" src="./src/app.js?v=20260307-10"></script>
+  <script type="module" src="./src/app.js?v=20260307-11"></script>
 </body>
 </html>
-

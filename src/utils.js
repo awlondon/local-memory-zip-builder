@@ -1,4 +1,4 @@
-export const STOP_WORDS = new Set([
+﻿export const STOP_WORDS = new Set([
   "a", "an", "and", "are", "as", "at", "be", "because", "been", "but", "by", "can", "could",
   "did", "do", "does", "for", "from", "had", "has", "have", "he", "her", "here", "him",
   "his", "i", "if", "in", "into", "is", "it", "its", "just", "me", "more", "most", "my",
@@ -20,7 +20,7 @@ export function clamp(number, min, max) {
 }
 
 export function normalizeWhitespace(text) {
-  return text.replace(/\s+/g, " ").trim();
+  return String(text || "").replace(/\s+/g, " ").trim();
 }
 
 export function normalizeConceptKey(text) {
@@ -30,8 +30,15 @@ export function normalizeConceptKey(text) {
     .trim();
 }
 
+export function normalizeArtifactKey(text) {
+  return normalizeWhitespace(text)
+    .toLowerCase()
+    .replace(/[^a-z0-9\s:_\-]/g, "")
+    .trim();
+}
+
 export function tokenize(text) {
-  const matches = text.toLowerCase().match(/[a-z0-9][a-z0-9_\-']*/g);
+  const matches = String(text || "").toLowerCase().match(/[a-z0-9][a-z0-9_\-']*/g);
   return matches ? matches.filter((token) => token.length > 1) : [];
 }
 
@@ -106,7 +113,7 @@ export function asJsonl(records) {
 }
 
 export function safeTitle(text, fallback) {
-  const firstLine = text
+  const firstLine = String(text || "")
     .split(/\r?\n/)
     .map((line) => normalizeWhitespace(line))
     .find((line) => line.length > 0);
@@ -178,4 +185,54 @@ export function toKeywordMap(concepts) {
   }
 
   return object;
+}
+
+export function stableHash(text) {
+  const source = String(text || "");
+  let h1 = 0xdeadbeef ^ source.length;
+  let h2 = 0x41c6ce57 ^ source.length;
+
+  for (let index = 0; index < source.length; index += 1) {
+    const code = source.charCodeAt(index);
+    h1 = Math.imul(h1 ^ code, 2654435761);
+    h2 = Math.imul(h2 ^ code, 1597334677);
+  }
+
+  h1 = Math.imul(h1 ^ (h1 >>> 16), 2246822507) ^ Math.imul(h2 ^ (h2 >>> 13), 3266489909);
+  h2 = Math.imul(h2 ^ (h2 >>> 16), 2246822507) ^ Math.imul(h1 ^ (h1 >>> 13), 3266489909);
+
+  return `${(h2 >>> 0).toString(16).padStart(8, "0")}${(h1 >>> 0).toString(16).padStart(8, "0")}`;
+}
+
+export function longestCommonPrefix(a, b) {
+  const left = String(a || "");
+  const right = String(b || "");
+  const max = Math.min(left.length, right.length);
+  let index = 0;
+  while (index < max && left.charCodeAt(index) === right.charCodeAt(index)) {
+    index += 1;
+  }
+  return index;
+}
+
+export function longestCommonSuffix(a, b, prefixFloor = 0) {
+  const left = String(a || "");
+  const right = String(b || "");
+  const max = Math.min(left.length, right.length);
+  let index = 0;
+  while (
+    index < max - prefixFloor &&
+    left.charCodeAt(left.length - 1 - index) === right.charCodeAt(right.length - 1 - index)
+  ) {
+    index += 1;
+  }
+  return index;
+}
+
+export function takeLeadingWords(text, count = 12) {
+  return tokenizeWithoutStopWords(text).slice(0, count).join(" ");
+}
+
+export function uniqueStrings(values) {
+  return [...new Set(values.filter(Boolean))];
 }

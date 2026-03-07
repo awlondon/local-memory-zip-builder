@@ -1,24 +1,30 @@
-import { createUIController } from "./ui.js";
+﻿import { createUIController } from "./ui.js";
 import { createZipBuilder } from "./zip.js";
 
 const STAGE_WEIGHTS = {
-  reading: 0.14,
-  segmenting: 0.14,
-  chunking: 0.16,
-  concept_extraction: 0.2,
-  graph_build: 0.14,
-  symbolic_streams: 0.06,
+  reading: 0.12,
+  segmenting: 0.12,
+  chunking: 0.12,
+  concept_extraction: 0.14,
+  artifact_promotion: 0.08,
+  textpack_build: 0.16,
+  textpack_validate: 0.06,
+  graph_build: 0.1,
+  symbolic_streams: 0.04,
   finalize: 0.06,
   archive_generation: 0.1
 };
 
-const WORKER_VERSION = "20260307-10";
+const WORKER_VERSION = "20260307-11";
 
 const STAGE_LABELS = {
   reading: "Reading input file...",
   segmenting: "Segmenting sessions...",
   chunking: "Building chunks...",
   concept_extraction: "Extracting recurring concepts...",
+  artifact_promotion: "Promoting structured artifacts...",
+  textpack_build: "Encoding textpack payloads...",
+  textpack_validate: "Validating textpack reconstruction...",
   graph_build: "Building graph artifacts...",
   symbolic_streams: "Generating symbolic streams...",
   finalize: "Preparing output files...",
@@ -183,7 +189,7 @@ async function handleWorkerMessage(message) {
     ui.setDownload(state.objectUrl, message.downloadName);
 
     const summary = message.report;
-    const doneStatus = `Done. ${summary.total_sessions} sessions, ${summary.total_chunks} chunks, ${summary.total_concepts} concepts, ${summary.total_edges} edges.`;
+    const doneStatus = `Done. ${summary.total_sessions} sessions, ${summary.total_chunks} chunks, ${summary.total_concepts} concepts, ${summary.total_edges} edges, ${summary.total_artifact_versions || 0} artifact versions.`;
 
     if (Array.isArray(message.warnings)) {
       for (const warning of message.warnings) {
@@ -310,4 +316,3 @@ function tryLoadScript(src) {
     document.head.appendChild(script);
   });
 }
-

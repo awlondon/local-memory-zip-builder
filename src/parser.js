@@ -1,4 +1,4 @@
-import { tokenizeForSimilarity } from "./utils.js";
+﻿import { tokenizeForSimilarity } from "./utils.js";
 
 const SPEAKER_PATTERN = /^([A-Za-z][A-Za-z0-9_ .\-]{0,40}):\s/;
 const TIMESTAMP_PATTERN = /\b(?:\d{1,2}:\d{2}(?::\d{2})?\s?(?:AM|PM)?|\d{4}-\d{2}-\d{2}|\d{1,2}\/\d{1,2}\/\d{2,4})\b/i;
@@ -118,7 +118,7 @@ export function parseTextToBlocks(text, onProgress = () => {}) {
       continue;
     }
 
-    const lineType = trimmed.startsWith(">") ? "quote" : "paragraph";
+    const lineType = classifyLineType(trimmed);
 
     if (!currentBlock) {
       startBlock(lineStart, lineType);
@@ -135,4 +135,64 @@ export function parseTextToBlocks(text, onProgress = () => {}) {
   onProgress(1);
 
   return blocks;
+}
+
+function classifyLineType(trimmed) {
+  if (isTableLine(trimmed)) {
+    return "table";
+  }
+
+  if (isJsonLikeLine(trimmed)) {
+    return "json";
+  }
+
+  if (isSectionHeading(trimmed)) {
+    return "section";
+  }
+
+  if (trimmed.startsWith(">")) {
+    return "quote";
+  }
+
+  return "paragraph";
+}
+
+function isTableLine(text) {
+  if (!text) {
+    return false;
+  }
+
+  if ((text.match(/\|/g) || []).length >= 2) {
+    return true;
+  }
+
+  if ((text.match(/\t/g) || []).length >= 2) {
+    return true;
+  }
+
+  return /^[^,]{1,80}(?:,[^,]{1,80}){2,}$/.test(text);
+}
+
+function isJsonLikeLine(text) {
+  if (!text) {
+    return false;
+  }
+
+  return (
+    /^[\[{]/.test(text) ||
+    /^"[^"\n]{1,120}"\s*:/.test(text) ||
+    /^(true|false|null|-?\d+(?:\.\d+)?)\s*[,}\]]?$/.test(text)
+  );
+}
+
+function isSectionHeading(text) {
+  if (!text || text.length > 120) {
+    return false;
+  }
+
+  return (
+    /^#{1,6}\s+/.test(text) ||
+    /^(chapter|section|part|appendix)\b/i.test(text) ||
+    /^[A-Z0-9][A-Z0-9\s:._\-/]{4,90}$/.test(text)
+  );
 }
