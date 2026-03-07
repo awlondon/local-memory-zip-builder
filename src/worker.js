@@ -41,6 +41,9 @@ const LOW_MEMORY_MAX_SESSION_RECORDS = 90000;
 const LOW_MEMORY_MAX_CHUNK_RECORDS = 180000;
 const LOW_MEMORY_MAX_CONCEPT_STATS = 180000;
 const CHUNK_PREVIEW_MAX = 260;
+const FILE_BATCH_MAX_ITEMS = 24;
+const FILE_BATCH_MAX_BYTES = 2 * 1024 * 1024;
+const LARGE_STRING_BLOB_THRESHOLD = 256 * 1024;
 
 self.addEventListener("message", (event) => {
   if (event.data?.type !== "start") {
@@ -127,7 +130,29 @@ async function runPipeline({ file, settings }) {
 
   pushWarning("Full chunk text is preserved in local_memory/chunks/chunk_text_part_*.jsonl for grounded retrieval.");
 
-  const files = [];
+  const pendingFiles = [];
+  let pendingFileBytes = 0;
+
+  const flushPendingFiles = () => {
+    if (!pendingFiles.length) {
+      return;
+    }
+
+    const batch = pendingFiles.splice(0, pendingFiles.length);
+    pendingFileBytes = 0;
+    self.postMessage({ type: "file_batch", files: batch });
+  };
+
+  const enqueueFile = (entry) => {
+    const normalizedEntry = normalizeFileEntry(entry);
+    pendingFiles.push(normalizedEntry);
+    pendingFileBytes += estimateContentSize(normalizedEntry.content);
+
+    if (pendingFiles.length >= FILE_BATCH_MAX_ITEMS || pendingFileBytes >= FILE_BATCH_MAX_BYTES) {
+      flushPendingFiles();
+    }
+  };
+
   const allSessions = [];
   const allChunks = [];
   const allConcepts = [];
@@ -253,7 +278,7 @@ async function runPipeline({ file, settings }) {
     if (includeSessionRawShards) {
       for (let j = 0; j < remapped.sessions.length; j += 1) {
         const session = remapped.sessions[j];
-        files.push({
+        enqueueFile({
           path: `local_memory/raw/${session.session_id}.txt`,
           content: session.text
         });
@@ -275,7 +300,7 @@ async function runPipeline({ file, settings }) {
       });
     }
 
-    files.push({ path: chunkTextShardPath, content: buildJsonlPayload(chunkTextRecords) });
+    enqueueFile({ path: chunkTextShardPath, content: buildJsonlPayload(chunkTextRecords) });
     chunkTextShardPaths.push(chunkTextShardPath);
 
     const lightweightSessions = remapped.sessions.map((session) => ({
@@ -412,33 +437,33 @@ async function runPipeline({ file, settings }) {
     format: inputFormat
   };
 
-  files.push({ path: "local_memory/manifest/corpus.json", content: JSON.stringify(corpusManifest, null, 2) });
-  files.push({ path: "local_memory/manifest/sessions.jsonl", content: sessionManifestJsonl });
-  files.push({ path: "local_memory/manifest/chunks.jsonl", content: chunkManifestJsonl });
-  files.push({ path: "local_memory/manifest/generation_report.json", content: JSON.stringify(generationReport, null, 2) });
+  enqueueFile({ path: "local_memory/manifest/corpus.json", content: JSON.stringify(corpusManifest, null, 2) });
+  enqueueFile({ path: "local_memory/manifest/sessions.jsonl", content: sessionManifestJsonl });
+  enqueueFile({ path: "local_memory/manifest/chunks.jsonl", content: chunkManifestJsonl });
+  enqueueFile({ path: "local_memory/manifest/generation_report.json", content: JSON.stringify(generationReport, null, 2) });
 
   if (includeRaw) {
     if (partPlan.length > 1) {
-      files.push({
+      enqueueFile({
         path: "local_memory/raw/_original_split_note.txt",
         content: `Original source file was split into ${partPlan.length} raw shards for deterministic sequential processing.`
       });
     } else {
-      files.push({
+      enqueueFile({
         path: "local_memory/raw/_original_file_note.txt",
         content: "Original source file is included as input_full.* in this folder."
       });
     }
 
     if (!includeSessionRawShards) {
-      files.push({
+      enqueueFile({
         path: "local_memory/raw/_session_shards_skipped.txt",
         content: "Session raw shard files were skipped in low-memory mode for large input safety. Use input_parts/ plus manifests for retrieval."
       });
     }
 
     if (!includeRawInputParts) {
-      files.push({
+      enqueueFile({
         path: "local_memory/raw/_input_parts_skipped.txt",
         content: "Original input parts were omitted from this ZIP to prevent browser memory exhaustion. Keep the original source file externally."
       });
@@ -447,48 +472,49 @@ async function runPipeline({ file, settings }) {
 
   const conceptShards = createShards(allConcepts, "concepts", "local_memory/concepts", 2000);
   for (let i = 0; i < conceptShards.length; i += 1) {
-    files.push(conceptShards[i]);
+    enqueueFile(conceptShards[i]);
   }
 
   const edgeShards = createShards(allEdges, "edges", "local_memory/graph", 4000);
   for (let i = 0; i < edgeShards.length; i += 1) {
-    files.push(edgeShards[i]);
+    enqueueFile(edgeShards[i]);
   }
-  files.push({ path: "local_memory/graph/concept_stats.jsonl", content: asJsonl(allConceptStats) });
+  enqueueFile({ path: "local_memory/graph/concept_stats.jsonl", content: asJsonl(allConceptStats) });
 
-  files.push({
+  enqueueFile({
     path: "local_memory/index/concept_index.json",
     content: JSON.stringify(buildConceptIndex(allConcepts), null, 2)
   });
-  files.push({
+  enqueueFile({
     path: "local_memory/index/session_index.json",
     content: JSON.stringify(buildSessionIndex(allSessions), null, 2)
   });
-  files.push({
+  enqueueFile({
     path: "local_memory/index/keyword_index.json",
     content: JSON.stringify(toKeywordMap(allConcepts), null, 2)
   });
-  files.push({
+  enqueueFile({
     path: "local_memory/index/chunk_text_shards.json",
     content: JSON.stringify(chunkTextShardPaths, null, 2)
   });
 
   if (includeSymbolic) {
     for (let i = 0; i < allSymbolicFiles.length; i += 1) {
-      files.push(allSymbolicFiles[i]);
+      enqueueFile(allSymbolicFiles[i]);
     }
   }
 
-  files.push({
+  enqueueFile({
     path: "local_memory/instructions/README.txt",
     content: buildInstructionsFile()
   });
 
   emitProgress("finalize", 1, "Output files ready.");
 
+  flushPendingFiles();
+
   self.postMessage({
     type: "complete",
-    files,
     warnings,
     downloadName: makeDownloadName(file.name),
     report: generationReport,
@@ -546,6 +572,51 @@ function emitProgress(stage, stageProgress, status) {
     stageProgress,
     status
   });
+}
+
+function normalizeFileEntry(entry) {
+  if (!entry || typeof entry.path !== "string") {
+    throw new Error("Worker attempted to emit an invalid file entry.");
+  }
+
+  if (typeof entry.content === "string" && entry.content.length >= LARGE_STRING_BLOB_THRESHOLD) {
+    return {
+      ...entry,
+      content: new Blob([entry.content], { type: inferMimeType(entry.path) })
+    };
+  }
+
+  return entry;
+}
+
+function estimateContentSize(content) {
+  if (typeof content === "string") {
+    return content.length;
+  }
+
+  if (content && typeof content.size === "number") {
+    return content.size;
+  }
+
+  if (content && typeof content.byteLength === "number") {
+    return content.byteLength;
+  }
+
+  return 0;
+}
+
+function inferMimeType(path) {
+  const lower = (path || "").toLowerCase();
+
+  if (lower.endsWith(".json") || lower.endsWith(".jsonl")) {
+    return "application/json";
+  }
+
+  if (lower.endsWith(".txt") || lower.endsWith(".md") || lower.endsWith(".log")) {
+    return "text/plain;charset=utf-8";
+  }
+
+  return "application/octet-stream";
 }
 
 function buildPartPlan(totalBytes, partByteSize) {
@@ -752,19 +823,4 @@ function makePreview(text) {
 function pause() {
   return new Promise((resolve) => setTimeout(resolve, 0));
 }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 

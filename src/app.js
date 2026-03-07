@@ -1,5 +1,5 @@
 import { createUIController } from "./ui.js";
-import { createZipBlob } from "./zip.js";
+import { createZipBuilder } from "./zip.js";
 
 const STAGE_WEIGHTS = {
   reading: 0.14,
@@ -12,7 +12,7 @@ const STAGE_WEIGHTS = {
   archive_generation: 0.1
 };
 
-const WORKER_VERSION = "20260307-8";
+const WORKER_VERSION = "20260307-9";
 
 const STAGE_LABELS = {
   reading: "Reading input file...",
@@ -33,6 +33,7 @@ const state = {
   startedAt: 0,
   timerId: null,
   worker: null,
+  zipBuilder: null,
   stageProgress: Object.create(null),
   objectUrl: null,
   warnings: [],
@@ -68,6 +69,7 @@ async function startGeneration() {
   state.startedAt = performance.now();
   state.warnings = [];
   state.inputFile = file;
+  state.zipBuilder = createZipBuilder();
   ui.setBusy(true);
   ui.setProgress(0, STAGE_LABELS.reading);
   ui.setTiming(0, Number.NaN);
@@ -127,11 +129,25 @@ async function handleWorkerMessage(message) {
     return;
   }
 
+  if (message.type === "file_batch") {
+    if (!state.zipBuilder) {
+      state.zipBuilder = createZipBuilder();
+    }
+
+    for (const entry of message.files || []) {
+      state.zipBuilder.addFile(entry);
+    }
+    return;
+  }
+
   if (message.type === "complete") {
     state.stageProgress.finalize = 1;
     ui.setProgress(computeOverallProgress() * 100, STAGE_LABELS.archive_generation);
 
-    const filesForZip = [...(message.files || [])];
+    if (!state.zipBuilder) {
+      state.zipBuilder = createZipBuilder();
+    }
+
     if (Array.isArray(message.rawFilePlan) && state.inputFile) {
       for (const plan of message.rawFilePlan) {
         if (!plan || typeof plan.path !== "string") {
@@ -142,7 +158,7 @@ async function handleWorkerMessage(message) {
         const end = Number.isFinite(plan.end) ? Math.max(start, plan.end) : state.inputFile.size;
         const shardBlob = state.inputFile.slice(start, end);
 
-        filesForZip.push({
+        state.zipBuilder.addFile({
           path: plan.path,
           content: shardBlob,
           options: {
@@ -152,7 +168,7 @@ async function handleWorkerMessage(message) {
       }
     }
 
-    const zipBlob = await createZipBlob(filesForZip, (archiveProgress) => {
+    const zipBlob = await state.zipBuilder.generate((archiveProgress) => {
       state.stageProgress.archive_generation = boundedProgress(archiveProgress);
       const overall = computeOverallProgress();
       ui.setProgress(overall * 100, STAGE_LABELS.archive_generation);
@@ -203,6 +219,8 @@ function finishGeneration() {
     clearInterval(state.timerId);
     state.timerId = null;
   }
+
+  state.zipBuilder = null;
 }
 
 function failGeneration(error) {
@@ -218,6 +236,7 @@ function resetRunState() {
   state.stageProgress = Object.create(null);
   state.warnings = [];
   state.inputFile = null;
+  state.zipBuilder = null;
   ui.setWarnings([]);
   ui.setDownload(null, null);
 }
@@ -291,9 +310,4 @@ function tryLoadScript(src) {
     document.head.appendChild(script);
   });
 }
-
-
-
-
-
 
