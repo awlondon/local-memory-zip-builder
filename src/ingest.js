@@ -1,5 +1,13 @@
 import { normalizeWhitespace } from "./utils.js";
 
+const BLOCK_TAGS = new Set([
+  "address", "article", "aside", "blockquote", "br", "dd", "div", "dl", "dt", "fieldset", "figcaption", "figure",
+  "footer", "form", "h1", "h2", "h3", "h4", "h5", "h6", "header", "hr", "li", "main", "nav", "ol", "p", "pre",
+  "section", "table", "tbody", "td", "th", "thead", "tr", "ul"
+]);
+
+const SKIP_CONTENT_TAGS = new Set(["script", "style", "noscript", "template"]);
+
 export function detectInputFormat(fileName, mimeType) {
   const name = (fileName || "").toLowerCase();
   const mime = (mimeType || "").toLowerCase();
@@ -55,18 +63,86 @@ function normalizePlainTextInput(rawText) {
 
 function normalizeHtmlInput(rawText) {
   const source = String(rawText || "");
+  const out = [];
 
-  let text = source;
-  text = text.replace(/<!--[\s\S]*?-->/g, " ");
-  text = text.replace(/<(script|style|noscript|template)\b[^>]*>[\s\S]*?<\/\1>/gi, " ");
-  text = text.replace(/<br\s*\/?>/gi, "\n");
-  text = text.replace(/<\/(p|div|section|article|header|footer|aside|nav|h[1-6]|li|ul|ol|pre|blockquote|table|tr|td|th)>/gi, "\n");
-  text = text.replace(/<[^>]+>/g, " ");
-  text = decodeHtmlEntities(text);
+  let i = 0;
+  let skipContentTag = null;
 
+  while (i < source.length) {
+    const ch = source[i];
+
+    if (ch !== "<") {
+      if (!skipContentTag) {
+        out.push(ch);
+      }
+      i += 1;
+      continue;
+    }
+
+    if (source.startsWith("<!--", i)) {
+      const endComment = source.indexOf("-->", i + 4);
+      i = endComment >= 0 ? endComment + 3 : source.length;
+      if (!skipContentTag) {
+        out.push(" ");
+      }
+      continue;
+    }
+
+    const endTag = source.indexOf(">", i + 1);
+    if (endTag < 0) {
+      if (!skipContentTag) {
+        out.push(" ");
+      }
+      break;
+    }
+
+    const insideRaw = source.slice(i + 1, endTag);
+    const inside = insideRaw.trim().toLowerCase();
+
+    if (inside.startsWith("!doctype") || inside.startsWith("?xml")) {
+      i = endTag + 1;
+      continue;
+    }
+
+    let tagBody = inside;
+    let isClosing = false;
+    if (tagBody.startsWith("/")) {
+      isClosing = true;
+      tagBody = tagBody.slice(1).trim();
+    }
+
+    const tagNameMatch = tagBody.match(/^([a-z0-9:-]+)/);
+    const tagName = tagNameMatch ? tagNameMatch[1] : "";
+
+    if (skipContentTag) {
+      if (isClosing && tagName === skipContentTag) {
+        skipContentTag = null;
+        if (BLOCK_TAGS.has(tagName)) {
+          out.push("\n");
+        }
+      }
+      i = endTag + 1;
+      continue;
+    }
+
+    if (!isClosing && tagName && SKIP_CONTENT_TAGS.has(tagName)) {
+      skipContentTag = tagName;
+      i = endTag + 1;
+      continue;
+    }
+
+    if (tagName && BLOCK_TAGS.has(tagName)) {
+      out.push("\n");
+    } else {
+      out.push(" ");
+    }
+
+    i = endTag + 1;
+  }
+
+  const text = decodeHtmlEntities(out.join(""));
   return normalizeLineStructure(text);
 }
-
 function normalizeJsonInput(rawText, pushWarning) {
   const source = String(rawText || "");
   let parsed;
@@ -196,27 +272,40 @@ function decodeHtmlEntities(text) {
 }
 
 function normalizeLineStructure(text) {
-  const normalizedNewlines = String(text || "").replace(/\r\n?/g, "\n");
-
-  const lines = normalizedNewlines
-    .split("\n")
-    .map((line) => line.replace(/[ \t]+/g, " ").trim());
-
+  const normalized = String(text || "").replace(/\r\n?/g, "\n");
   const compact = [];
+
+  let current = "";
   let previousBlank = false;
 
-  for (const line of lines) {
+  function flushCurrent() {
+    const line = current.replace(/[ \t]+/g, " ").trim();
+    current = "";
+
     if (!line) {
       if (!previousBlank) {
         compact.push("");
         previousBlank = true;
       }
-      continue;
+      return;
     }
 
     compact.push(line);
     previousBlank = false;
   }
 
+  for (let i = 0; i < normalized.length; i += 1) {
+    const ch = normalized[i];
+    if (ch === "\n") {
+      flushCurrent();
+    } else {
+      current += ch;
+    }
+  }
+
+  flushCurrent();
+
   return compact.join("\n").trim();
 }
+
+

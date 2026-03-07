@@ -5,7 +5,6 @@ const TIMESTAMP_PATTERN = /\b(?:\d{1,2}:\d{2}(?::\d{2})?\s?(?:AM|PM)?|\d{4}-\d{2
 
 export function parseTextToBlocks(text, onProgress = () => {}) {
   const blocks = [];
-  const linePattern = /.*(?:\r\n|\n|$)/g;
 
   let currentBlock = null;
   let inCodeFence = false;
@@ -57,16 +56,27 @@ export function parseTextToBlocks(text, onProgress = () => {}) {
     currentBlock = null;
   }
 
-  let match;
-  while ((match = linePattern.exec(text)) !== null) {
-    const lineChunk = match[0];
-    if (!lineChunk && linePattern.lastIndex >= text.length) {
-      break;
+  let cursor = 0;
+  while (cursor < text.length) {
+    const lineStart = cursor;
+    const newlineIndex = text.indexOf("\n", cursor);
+
+    let lineChunk;
+    let lineEnd;
+
+    if (newlineIndex === -1) {
+      lineChunk = text.slice(cursor);
+      lineEnd = text.length;
+      cursor = text.length;
+    } else {
+      lineChunk = text.slice(cursor, newlineIndex + 1);
+      lineEnd = newlineIndex + 1;
+      cursor = newlineIndex + 1;
     }
 
-    const lineStart = match.index;
-    const lineEnd = lineStart + lineChunk.length;
-    const lineBody = lineChunk.replace(/[\r\n]+$/, "");
+    const lineBody = lineChunk.endsWith("\n")
+      ? lineChunk.slice(0, lineChunk.endsWith("\r\n") ? -2 : -1)
+      : lineChunk;
     const trimmed = lineBody.trim();
 
     processedChars = lineEnd;
