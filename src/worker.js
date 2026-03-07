@@ -133,7 +133,8 @@ async function runPipeline({ file, settings }) {
   const allConcepts = [];
   const allEdges = [];
   const allConceptStats = [];
-  const allSymbolicFiles = [];`r`n  const chunkTextShardPaths = [];
+  const allSymbolicFiles = [];
+  const chunkTextShardPaths = [];
 
   const counters = {
     session: 1,
