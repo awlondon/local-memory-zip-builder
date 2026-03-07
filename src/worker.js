@@ -4,7 +4,7 @@ import { chunkSessions } from "./chunker.js";
 import { extractConcepts } from "./concepts.js";
 import { buildGraphArtifacts } from "./graph.js";
 import { buildSymbolicStreams } from "./symbolic.js";
-import { detectInputFormat, normalizeInputForRetrieval, rawInputShardPath } from "./ingest.js";
+import { detectInputFormat, normalizeInputForRetrieval, rawInputShardPath } from "./ingest.js?v=20260307-10";
 import {
   buildConceptIndex,
   buildCorpusManifest,
