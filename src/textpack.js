@@ -19,6 +19,22 @@ const RECENT_RECORD_WINDOW = 32;
 export function buildTextpackBundle(chunks, chunkConcepts, options = {}) {
   const onArtifactProgress = options.onArtifactProgress || (() => {});
   const onEncodingProgress = options.onEncodingProgress || (() => {});
+  const bundleId = Number.isFinite(options.bundleId) ? Math.max(1, options.bundleId) : 1;
+  const shardTag = padNumber(bundleId);
+  const shardScopedAuxPaths = options.forceShardScopedAuxPaths === true;
+  const shardPath = `local_memory/textpack/textpack_${shardTag}.bin`;
+  const recordPath = `local_memory/textpack/textpack_${shardTag}.index.jsonl`;
+  const lexiconPath = shardScopedAuxPaths || bundleId !== 1
+    ? `local_memory/textpack/lexicon_${shardTag}.json`
+    : "local_memory/textpack/lexicon_global.json";
+  const templatesPath = shardScopedAuxPaths || bundleId !== 1
+    ? `local_memory/textpack/templates_${shardTag}.json`
+    : "local_memory/textpack/templates.json";
+  const manifestPath = options.manifestPath || (
+    shardScopedAuxPaths || bundleId !== 1
+      ? `local_memory/textpack/textpack_manifest_${shardTag}.json`
+      : "local_memory/textpack/textpack_manifest.json"
+  );
 
   const lexicon = buildLexicon(chunks);
   const templates = buildTemplates(chunks);
@@ -60,7 +76,7 @@ export function buildTextpackBundle(chunks, chunkConcepts, options = {}) {
 
     if (recordByTextHash.has(textHash) && recordByTextHash.get(textHash).text === chunk.text) {
       const existing = recordByTextHash.get(textHash);
-      chunkTextRefs[chunk.chunk_id] = makeTextRef(existing.record);
+      chunkTextRefs[chunk.chunk_id] = makeTextRef(existing.record, shardPath);
       chunkPhraseMap[chunk.chunk_id] = existing.recordData.phrase_ids || [];
       continue;
     }
@@ -93,7 +109,7 @@ export function buildTextpackBundle(chunks, chunkConcepts, options = {}) {
       recentRecords.shift();
     }
 
-    chunkTextRefs[chunk.chunk_id] = makeTextRef(recordNumber);
+    chunkTextRefs[chunk.chunk_id] = makeTextRef(recordNumber, shardPath);
     chunkPhraseMap[chunk.chunk_id] = finalRecord.phrase_ids;
     onEncodingProgress(clamp((index + 1) / Math.max(1, chunks.length), 0, 1));
   }
@@ -104,15 +120,13 @@ export function buildTextpackBundle(chunks, chunkConcepts, options = {}) {
 
   const literalStore = literalParts.join("");
   const literalBlob = new Blob([new TextEncoder().encode(literalStore)], { type: "application/octet-stream" });
-  const recordPath = "local_memory/textpack/textpack_000001.index.jsonl";
-  const shardPath = "local_memory/textpack/textpack_000001.bin";
   const files = [
     {
-      path: "local_memory/textpack/lexicon_global.json",
+      path: lexiconPath,
       content: JSON.stringify({ entries: lexicon }, null, 2)
     },
     {
-      path: "local_memory/textpack/templates.json",
+      path: templatesPath,
       content: JSON.stringify({ entries: templates }, null, 2)
     },
     {
@@ -137,8 +151,8 @@ export function buildTextpackBundle(chunks, chunkConcepts, options = {}) {
       }
     ],
     dictionary: {
-      lexicon_path: "local_memory/textpack/lexicon_global.json",
-      templates_path: "local_memory/textpack/templates.json"
+      lexicon_path: lexiconPath,
+      templates_path: templatesPath
     },
     delta: {
       enabled: options.enableDeltaEncoding !== false,
@@ -154,7 +168,7 @@ export function buildTextpackBundle(chunks, chunkConcepts, options = {}) {
   };
 
   files.push({
-    path: "local_memory/textpack/textpack_manifest.json",
+    path: manifestPath,
     content: JSON.stringify(manifest, null, 2)
   });
 
@@ -177,6 +191,7 @@ export function buildTextpackBundle(chunks, chunkConcepts, options = {}) {
     artifacts,
     validation,
     shardPaths: [shardPath, recordPath],
+    manifestPath,
     stats: manifest.stats
   };
 }
@@ -448,10 +463,10 @@ function estimateDirectCost(record) {
   return literalCost + phraseCost + templateCost + 8;
 }
 
-function makeTextRef(record) {
+function makeTextRef(record, shard) {
   return {
     mode: "textpack",
-    shard: "local_memory/textpack/textpack_000001.bin",
+    shard,
     record
   };
 }
