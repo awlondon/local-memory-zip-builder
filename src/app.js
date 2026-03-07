@@ -12,6 +12,8 @@ const STAGE_WEIGHTS = {
   archive_generation: 0.1
 };
 
+const WORKER_VERSION = "20260307-2";
+
 const STAGE_LABELS = {
   reading: "Reading input file...",
   segmenting: "Segmenting sessions...",
@@ -74,7 +76,9 @@ async function startGeneration() {
     renderTiming();
   }, 300);
 
-  const worker = new Worker(new URL("./worker.js", import.meta.url), { type: "module" });
+  const workerUrl = new URL("./worker.js", import.meta.url);
+  workerUrl.searchParams.set("v", WORKER_VERSION);
+  const worker = new Worker(workerUrl, { type: "module" });
   state.worker = worker;
 
   worker.addEventListener("message", async (event) => {
@@ -287,3 +291,4 @@ function tryLoadScript(src) {
     document.head.appendChild(script);
   });
 }
+

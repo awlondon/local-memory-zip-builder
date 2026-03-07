@@ -197,11 +197,11 @@ async function runPipeline({ file, settings }) {
       previousLastChunkId = remapped.chunks[remapped.chunks.length - 1].chunk_id;
     }
 
-    appendAll(allSessions, remapped.sessions);
-    appendAll(allChunks, remapped.chunks);
-    appendAll(allConcepts, remapped.concepts);
-    appendAll(allEdges, partGraph.edges);
-    appendAll(allConceptStats, partGraph.conceptStats);
+    for (let j = 0; j < remapped.sessions.length; j += 1) { allSessions.push(remapped.sessions[j]); }
+    for (let j = 0; j < remapped.chunks.length; j += 1) { allChunks.push(remapped.chunks[j]); }
+    for (let j = 0; j < remapped.concepts.length; j += 1) { allConcepts.push(remapped.concepts[j]); }
+    for (let j = 0; j < partGraph.edges.length; j += 1) { allEdges.push(partGraph.edges[j]); }
+    for (let j = 0; j < partGraph.conceptStats.length; j += 1) { allConceptStats.push(partGraph.conceptStats[j]); }
 
     if (settings.includeSymbolic) {
       emitProgress("symbolic_streams", aggregatePartProgress(i, partPlan.length, 0), `Generating symbolic stream for ${partLabel}...`);
@@ -212,7 +212,7 @@ async function runPipeline({ file, settings }) {
           `Mapping glyph families for ${partLabel}...`
         );
       });
-      appendAll(allSymbolicFiles, partSymbolic);
+      for (let j = 0; j < partSymbolic.length; j += 1) { allSymbolicFiles.push(partSymbolic[j]); }
     }
 
     await pause();
@@ -298,10 +298,10 @@ async function runPipeline({ file, settings }) {
   }
 
   const conceptShards = createShards(allConcepts, "concepts", "local_memory/concepts", 2000);
-  appendAll(files, conceptShards);
+  for (let j = 0; j < conceptShards.length; j += 1) { files.push(conceptShards[j]); }
 
   const edgeShards = createShards(allEdges, "edges", "local_memory/graph", 4000);
-  appendAll(files, edgeShards);
+  for (let j = 0; j < edgeShards.length; j += 1) { files.push(edgeShards[j]); }
   files.push({ path: "local_memory/graph/concept_stats.jsonl", content: asJsonl(allConceptStats) });
 
   files.push({
@@ -318,7 +318,7 @@ async function runPipeline({ file, settings }) {
   });
 
   if (settings.includeSymbolic) {
-    appendAll(files, allSymbolicFiles);
+    for (let j = 0; j < allSymbolicFiles.length; j += 1) { files.push(allSymbolicFiles[j]); }
   }
 
   files.push({
@@ -538,18 +538,11 @@ function roundMb(bytes) {
   return Math.round((bytes / (1024 * 1024)) * 10) / 10;
 }
 
-function appendAll(target, source) {
-  if (!Array.isArray(source) || source.length === 0) {
-    return;
-  }
-
-  for (let i = 0; i < source.length; i += 1) {
-    target.push(source[i]);
-  }
-}
 function pause() {
   return new Promise((resolve) => setTimeout(resolve, 0));
 }
+
+
 
 
 
