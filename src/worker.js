@@ -538,9 +538,19 @@ function roundMb(bytes) {
   return Math.round((bytes / (1024 * 1024)) * 10) / 10;
 }
 
+function appendAll(target, source) {
+  if (!Array.isArray(source) || source.length === 0) {
+    return;
+  }
+
+  for (let i = 0; i < source.length; i += 1) {
+    target.push(source[i]);
+  }
+}
 function pause() {
   return new Promise((resolve) => setTimeout(resolve, 0));
 }
+
 
 
 
