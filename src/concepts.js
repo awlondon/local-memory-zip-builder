@@ -85,8 +85,16 @@ export function extractConcepts(chunks, settings, onProgress = () => {}) {
     });
   }
 
-  const maxMentions = Math.max(1, ...filtered.map((item) => item.totalMentions));
-  const maxSpread = Math.max(1, ...filtered.map((item) => item.sessionSpread));
+  let maxMentions = 1;
+  let maxSpread = 1;
+  for (const item of filtered) {
+    if (item.totalMentions > maxMentions) {
+      maxMentions = item.totalMentions;
+    }
+    if (item.sessionSpread > maxSpread) {
+      maxSpread = item.sessionSpread;
+    }
+  }
 
   for (const item of filtered) {
     const mentionScore = item.totalMentions / maxMentions;
@@ -224,3 +232,4 @@ function bestSurface(surfaceCounts, fallback) {
 
   return sorted[0][0];
 }
+

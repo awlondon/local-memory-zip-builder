@@ -128,14 +128,24 @@ async function handleWorkerMessage(message) {
     ui.setProgress(computeOverallProgress() * 100, STAGE_LABELS.archive_generation);
 
     const filesForZip = [...(message.files || [])];
-    if (message.rawInputPath && state.inputFile) {
-      filesForZip.push({
-        path: message.rawInputPath,
-        content: state.inputFile,
-        options: {
-          compression: state.inputFile.size > 25 * 1024 * 1024 ? "STORE" : "DEFLATE"
+    if (Array.isArray(message.rawFilePlan) && state.inputFile) {
+      for (const plan of message.rawFilePlan) {
+        if (!plan || typeof plan.path !== "string") {
+          continue;
         }
-      });
+
+        const start = Number.isFinite(plan.start) ? Math.max(0, plan.start) : 0;
+        const end = Number.isFinite(plan.end) ? Math.max(start, plan.end) : state.inputFile.size;
+        const shardBlob = state.inputFile.slice(start, end);
+
+        filesForZip.push({
+          path: plan.path,
+          content: shardBlob,
+          options: {
+            compression: plan.compression || (shardBlob.size > 25 * 1024 * 1024 ? "STORE" : "DEFLATE")
+          }
+        });
+      }
     }
 
     const zipBlob = await createZipBlob(filesForZip, (archiveProgress) => {

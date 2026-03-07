@@ -7,6 +7,7 @@ A GitHub Pages-compatible browser app that converts a `.txt`, `.html`, or `.json
 - Runs fully client-side (HTML/CSS/vanilla JS)
 - Accepts `.txt`, `.html/.htm`, and `.json` input
 - Uses a Web Worker for heavy processing
+- Splits oversized inputs into deterministic source parts and processes them sequentially
 - Sessionizes and chunks text using deterministic heuristics
 - Extracts recurring concepts and concept/chunk/session links
 - Builds graph and index artifacts as JSON/JSONL
@@ -26,6 +27,8 @@ local_memory/
     generation_report.json
   raw/
     input_full.txt / input_full.html / input_full.json
+    input_parts/input_part_000001.html  (for large inputs)
+    input_parts/input_part_000002.html
     sess_000001.txt
     ...
   symbolic/
@@ -66,8 +69,8 @@ A workflow is already included at `.github/workflows/deploy-pages.yml`.
 - The pipeline is deterministic for the same file content + file metadata + settings.
 - ZIP entries use a fixed timestamp for stable output ordering.
 - Browser memory constraints still apply for very large files.
-- For very large HTML/JSON inputs, indexing uses a bounded retrieval window to avoid browser crashes (reported in generation report warnings).
-- Extremely large originals may be omitted from ZIP embedding; split files for full lossless packaging.
+- Large files are split and processed part-by-part to reduce memory spikes.
+- Extremely large outputs can still take significant time during ZIP generation.
 - No external AI APIs or backend services are required.
 
 ## JSZip
