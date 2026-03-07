@@ -69,7 +69,7 @@ A workflow is already included at `.github/workflows/deploy-pages.yml`.
 - The pipeline is deterministic for the same file content + file metadata + settings.
 - ZIP entries use a fixed timestamp for stable output ordering.
 - Browser memory constraints still apply for very large files.
-- Large files are split and processed part-by-part to reduce memory spikes.\n- In low-memory mode for very large inputs, per-session raw shard files may be skipped to prevent browser OOM; input_parts/ are still included.
+- Large files are split and processed part-by-part to reduce memory spikes.`r`n- In low-memory mode for very large inputs, symbolic streams and per-session raw shard files may be skipped to prevent browser OOM. For extremely large files, raw input parts may also be omitted from the ZIP.
 - Extremely large outputs can still take significant time during ZIP generation.
 - No external AI APIs or backend services are required.
 
@@ -79,4 +79,6 @@ The app tries to load JSZip from `./vendor/jszip.min.js` first, then falls back 
 `https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js`.
 
 For strict offline usage, place JSZip at `vendor/jszip.min.js`.
+
+
 

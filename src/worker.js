@@ -5,11 +5,13 @@ import { extractConcepts } from "./concepts.js";
 import { buildGraphArtifacts } from "./graph.js";
 import { buildSymbolicStreams } from "./symbolic.js";
 import { detectInputFormat, normalizeInputForRetrieval, rawInputShardPath } from "./ingest.js";
-import {  buildConceptIndex,
+import {
+  buildConceptIndex,
   buildCorpusManifest,
   buildGenerationReport,
   buildInstructionsFile,
-  buildSessionIndex,} from "./schemas.js";
+  buildSessionIndex
+} from "./schemas.js";
 import {
   asJsonl,
   createShards,
@@ -33,7 +35,11 @@ const LOW_MEMORY_PART_BYTES = {
 
 const LOW_MEMORY_THRESHOLD_BYTES = 220 * 1024 * 1024;
 const RAW_SHARD_COMPRESS_STORE_BYTES = 25 * 1024 * 1024;
-const MAX_EDGES_TOTAL = 500000;
+const MAX_EDGES_TOTAL = 150000;
+const MAX_RAW_INPUT_PARTS_IN_ZIP_BYTES = 280 * 1024 * 1024;
+const LOW_MEMORY_MAX_SESSION_RECORDS = 90000;
+const LOW_MEMORY_MAX_CHUNK_RECORDS = 180000;
+const LOW_MEMORY_MAX_CONCEPT_STATS = 180000;
 const CHUNK_PREVIEW_MAX = 260;
 
 self.addEventListener("message", (event) => {
@@ -101,9 +107,22 @@ async function runPipeline({ file, settings }) {
   }
 
   const includeRaw = settings.includeRaw !== false;
+  const includeSymbolic = settings.includeSymbolic && !lowMemoryMode;
   const includeSessionRawShards = includeRaw && !lowMemoryMode;
+  const includeRawInputParts = includeRaw && (!lowMemoryMode || bytes <= MAX_RAW_INPUT_PARTS_IN_ZIP_BYTES);
+
+  if (settings.includeSymbolic && !includeSymbolic) {
+    pushWarning("Symbolic streams are disabled in low-memory mode for very large inputs.");
+  }
+
   if (includeRaw && !includeSessionRawShards) {
-    pushWarning("Session raw shard files are skipped in low-memory mode to prevent browser crashes. Original input parts are still included.");
+    pushWarning("Session raw shard files are skipped in low-memory mode to prevent browser crashes.");
+  }
+
+  if (includeRaw && !includeRawInputParts) {
+    pushWarning(
+      `Original input parts are omitted from ZIP above ${(MAX_RAW_INPUT_PARTS_IN_ZIP_BYTES / (1024 * 1024)).toFixed(0)} MB to prevent browser OOM.`
+    );
   }
 
   const files = [];
@@ -124,6 +143,9 @@ async function runPipeline({ file, settings }) {
   let previousLastChunkId = null;
   let globalOffsetBase = 0;
   let edgeCapReached = false;
+  let sessionCapWarned = false;
+  let chunkCapWarned = false;
+  let conceptStatsCapWarned = false;
 
   for (let i = 0; i < partPlan.length; i += 1) {
     const part = partPlan[i];
@@ -255,11 +277,23 @@ async function runPipeline({ file, settings }) {
     }));
 
     for (let j = 0; j < lightweightSessions.length; j += 1) {
-      allSessions.push(lightweightSessions[j]);
+      if (!lowMemoryMode || allSessions.length < LOW_MEMORY_MAX_SESSION_RECORDS) {
+        allSessions.push(lightweightSessions[j]);
+      } else if (!sessionCapWarned) {
+        pushWarning(`Session manifest cap reached at ${LOW_MEMORY_MAX_SESSION_RECORDS} records in low-memory mode.`);
+        sessionCapWarned = true;
+      }
     }
+
     for (let j = 0; j < lightweightChunks.length; j += 1) {
-      allChunks.push(lightweightChunks[j]);
+      if (!lowMemoryMode || allChunks.length < LOW_MEMORY_MAX_CHUNK_RECORDS) {
+        allChunks.push(lightweightChunks[j]);
+      } else if (!chunkCapWarned) {
+        pushWarning(`Chunk manifest cap reached at ${LOW_MEMORY_MAX_CHUNK_RECORDS} records in low-memory mode.`);
+        chunkCapWarned = true;
+      }
     }
+
     for (let j = 0; j < remapped.concepts.length; j += 1) {
       allConcepts.push(remapped.concepts[j]);
     }
@@ -275,10 +309,15 @@ async function runPipeline({ file, settings }) {
     }
 
     for (let j = 0; j < partGraph.conceptStats.length; j += 1) {
-      allConceptStats.push(partGraph.conceptStats[j]);
+      if (!lowMemoryMode || allConceptStats.length < LOW_MEMORY_MAX_CONCEPT_STATS) {
+        allConceptStats.push(partGraph.conceptStats[j]);
+      } else if (!conceptStatsCapWarned) {
+        pushWarning(`Concept stat cap reached at ${LOW_MEMORY_MAX_CONCEPT_STATS} records in low-memory mode.`);
+        conceptStatsCapWarned = true;
+      }
     }
 
-    if (settings.includeSymbolic) {
+    if (includeSymbolic) {
       emitProgress("symbolic_streams", aggregatePartProgress(i, partPlan.length, 0), `Generating symbolic stream for ${partLabel}...`);
       const partSymbolic = buildSymbolicStreams(remapped.sessions, remapped.chunks, (fraction) => {
         emitProgress(
@@ -305,7 +344,7 @@ async function runPipeline({ file, settings }) {
   emitProgress("chunking", 1, "Chunks ready.");
   emitProgress("concept_extraction", 1, "Concept extraction complete.");
   emitProgress("graph_build", 1, "Graph artifacts complete.");
-  emitProgress("symbolic_streams", 1, settings.includeSymbolic ? "Symbolic streams complete." : "Symbolic streams disabled.");
+  emitProgress("symbolic_streams", 1, includeSymbolic ? "Symbolic streams complete." : "Symbolic streams disabled.");
 
   emitProgress("finalize", 0, "Preparing output files...");
 
@@ -371,6 +410,13 @@ async function runPipeline({ file, settings }) {
         content: "Session raw shard files were skipped in low-memory mode for large input safety. Use input_parts/ plus manifests for retrieval."
       });
     }
+
+    if (!includeRawInputParts) {
+      files.push({
+        path: "local_memory/raw/_input_parts_skipped.txt",
+        content: "Original input parts were omitted from this ZIP to prevent browser memory exhaustion. Keep the original source file externally."
+      });
+    }
   }
 
   const conceptShards = createShards(allConcepts, "concepts", "local_memory/concepts", 2000);
@@ -397,7 +443,7 @@ async function runPipeline({ file, settings }) {
     content: JSON.stringify(toKeywordMap(allConcepts), null, 2)
   });
 
-  if (settings.includeSymbolic) {
+  if (includeSymbolic) {
     for (let i = 0; i < allSymbolicFiles.length; i += 1) {
       files.push(allSymbolicFiles[i]);
     }
@@ -416,7 +462,7 @@ async function runPipeline({ file, settings }) {
     warnings,
     downloadName: makeDownloadName(file.name),
     report: generationReport,
-    rawFilePlan: includeRaw ? buildRawFilePlan(partPlan, file.name, inputFormat) : []
+    rawFilePlan: includeRawInputParts ? buildRawFilePlan(partPlan, file.name, inputFormat) : []
   });
 }
 
@@ -676,6 +722,15 @@ function makePreview(text) {
 function pause() {
   return new Promise((resolve) => setTimeout(resolve, 0));
 }
+
+
+
+
+
+
+
+
+
 
 
 
