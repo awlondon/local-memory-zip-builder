@@ -463,6 +463,16 @@ async function runPipeline({ file, settings }) {
   }
   emitProgress("symbolic_streams", 1, includeSymbolic ? "Symbolic streams complete." : "Symbolic streams disabled.");
 
+  // ── Release large data structures no longer needed ──
+  allFullChunks.length = 0;
+  for (const key of Object.keys(textpackChunkPhraseMap)) {
+    delete textpackChunkPhraseMap[key];
+  }
+  for (const key of Object.keys(textpackChunkTextRefs)) {
+    delete textpackChunkTextRefs[key];
+  }
+  textpackArtifacts.length = 0;
+
   emitProgress("finalize", 0, "Preparing output files...");
 
   const corpusManifest = buildCorpusManifest(file.name, bytes, settings, {
