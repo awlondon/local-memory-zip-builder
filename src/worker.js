@@ -349,9 +349,13 @@ async function runPipeline({ file, settings }) {
         onArtifactProgress: (fraction) => emitProgress("artifact_promotion", fraction, "Promoting structured artifacts..."),
         onEncodingProgress: (fraction) => emitProgress("textpack_build", fraction, "Encoding textpack payloads...")
       });
+      for (const fileEntry of textpackBundle.files) {
+        enqueueFile(fileEntry);
+      }
+      flushPendingFiles();
+      textpackBundle.files = [];
     } else {
       const shardCount = Math.ceil(allFullChunks.length / TEXTPACK_SHARD_SIZE);
-      const mergedFiles = [];
       const mergedShardPaths = [];
       const mergedShardEntries = [];
       const mergedChunkTextRefs = Object.create(null);
@@ -386,7 +390,11 @@ async function runPipeline({ file, settings }) {
           }
         });
 
-        mergedFiles.push(...bundle.files);
+        for (const fileEntry of bundle.files) {
+          enqueueFile(fileEntry);
+        }
+        flushPendingFiles();
+
         mergedShardPaths.push(...bundle.shardPaths);
         mergedShardEntries.push(...bundle.manifest.shards.map((shard) => ({
           ...shard,
@@ -409,7 +417,7 @@ async function runPipeline({ file, settings }) {
       }
 
       textpackBundle = {
-        files: mergedFiles,
+        files: [],
         manifest: {
           shards: mergedShardEntries,
           dictionary: { lexicon_path: null, templates_path: null }
