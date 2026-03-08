@@ -7,7 +7,7 @@ import { buildSymbolicStreams } from "./symbolic.js";
 import { buildTextpackBundle } from "./textpack.js";
 import { buildSymbolLibrary } from "./symbol-library.js";
 import { buildQueryProtocol } from "./query.js";
-import { detectInputFormat, normalizeInputForRetrieval, rawInputShardPath } from "./ingest.js?v=20260308-01";
+import { detectInputFormat, normalizeInputForRetrieval, rawInputShardPath } from "./ingest.js?v=20260308-02";
 import {
   buildChunkManifest,
   buildConceptIndex,
