@@ -1,5 +1,5 @@
 ﻿import { createUIController } from "./ui.js";
-import { createZipBuilder } from "./zip.js";
+import { createZipBuilder, createStreamingZipBuilder } from "./zip.js";
 
 const STAGE_WEIGHTS = {
   reading: 0.12,
@@ -40,6 +40,7 @@ const state = {
   timerId: null,
   worker: null,
   zipBuilder: null,
+  useStreamingZip: false,
   stageProgress: Object.create(null),
   objectUrl: null,
   warnings: [],
@@ -71,11 +72,13 @@ async function startGeneration() {
   await ensureJsZipLoaded();
   resetRunState();
 
+  const STREAMING_ZIP_THRESHOLD = 200 * 1024 * 1024;
   state.running = true;
   state.startedAt = performance.now();
   state.warnings = [];
   state.inputFile = file;
-  state.zipBuilder = createZipBuilder();
+  state.useStreamingZip = file.size > STREAMING_ZIP_THRESHOLD;
+  state.zipBuilder = state.useStreamingZip ? createStreamingZipBuilder() : createZipBuilder();
   ui.setBusy(true);
   ui.setProgress(0, STAGE_LABELS.reading);
   ui.setTiming(0, Number.NaN);
@@ -137,11 +140,11 @@ async function handleWorkerMessage(message) {
 
   if (message.type === "file_batch") {
     if (!state.zipBuilder) {
-      state.zipBuilder = createZipBuilder();
+      state.zipBuilder = state.useStreamingZip ? createStreamingZipBuilder() : createZipBuilder();
     }
 
     for (const entry of message.files || []) {
-      state.zipBuilder.addFile(entry);
+      await state.zipBuilder.addFile(entry);
     }
     return;
   }
@@ -151,7 +154,7 @@ async function handleWorkerMessage(message) {
     ui.setProgress(computeOverallProgress() * 100, STAGE_LABELS.archive_generation);
 
     if (!state.zipBuilder) {
-      state.zipBuilder = createZipBuilder();
+      state.zipBuilder = state.useStreamingZip ? createStreamingZipBuilder() : createZipBuilder();
     }
 
     if (Array.isArray(message.rawFilePlan) && state.inputFile) {
@@ -164,7 +167,7 @@ async function handleWorkerMessage(message) {
         const end = Number.isFinite(plan.end) ? Math.max(start, plan.end) : state.inputFile.size;
         const shardBlob = state.inputFile.slice(start, end);
 
-        state.zipBuilder.addFile({
+        await state.zipBuilder.addFile({
           path: plan.path,
           content: shardBlob,
           options: {
