@@ -259,6 +259,7 @@ function promoteArtifacts(chunks, chunkConcepts, onProgress) {
 
 function buildLexicon(chunks) {
   const counts = new Map();
+  const PRUNE_THRESHOLD = 8_000_000;
 
   for (const chunk of chunks) {
     const tokens = tokenize(chunk.text);
@@ -274,6 +275,14 @@ function buildLexicon(chunks) {
         }
         seen.add(phrase);
         counts.set(phrase, (counts.get(phrase) || 0) + 1);
+      }
+    }
+
+    if (counts.size > PRUNE_THRESHOLD) {
+      for (const [key, count] of counts) {
+        if (count === 1) {
+          counts.delete(key);
+        }
       }
     }
   }
