@@ -270,6 +270,9 @@ function buildLexicon(chunks) {
     }
   }
 
+  let insertsSincePrune = 0;
+  const PRUNE_CHECK_INTERVAL = 50_000;
+
   for (const chunk of chunks) {
     const tokens = tokenize(chunk.text);
     const seen = new Set();
@@ -284,13 +287,15 @@ function buildLexicon(chunks) {
         }
         seen.add(phrase);
         counts.set(phrase, (counts.get(phrase) || 0) + 1);
-      }
-    }
+        insertsSincePrune += 1;
 
-    if (counts.size > PRUNE_THRESHOLD) {
-      prune(1);
-      if (counts.size > HARD_CEILING) {
-        prune(2);
+        if (insertsSincePrune >= PRUNE_CHECK_INTERVAL && counts.size > PRUNE_THRESHOLD) {
+          prune(1);
+          if (counts.size > HARD_CEILING) {
+            prune(2);
+          }
+          insertsSincePrune = 0;
+        }
       }
     }
   }
