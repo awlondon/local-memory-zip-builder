@@ -509,12 +509,12 @@ async function runPipeline({ file, settings }) {
     format: inputFormat
   };
 
-  const textpackStats = summarizeTextpackStats(textpackStatsSummaries);
-  if (textpackStats.raw_text_bytes > 0 && textpackStats.textpack_literal_bytes > 0) {
+  const textpackStatsSummary = summarizeTextpackStats(textpackStatsSummaries);
+  if (textpackStatsSummary.raw_text_bytes > 0 && textpackStatsSummary.textpack_literal_bytes > 0) {
     generationReport.compression = {
-      raw_text_bytes: textpackStats.raw_text_bytes,
-      textpack_literal_bytes: textpackStats.textpack_literal_bytes,
-      compression_ratio: Number((textpackStats.raw_text_bytes / textpackStats.textpack_literal_bytes).toFixed(2))
+      raw_text_bytes: textpackStatsSummary.raw_text_bytes,
+      textpack_literal_bytes: textpackStatsSummary.textpack_literal_bytes,
+      compression_ratio: Number((textpackStatsSummary.raw_text_bytes / textpackStatsSummary.textpack_literal_bytes).toFixed(2))
     };
   }
 

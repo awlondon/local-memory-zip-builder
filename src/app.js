@@ -101,7 +101,9 @@ async function startGeneration() {
   });
 
   worker.addEventListener("error", (event) => {
-    failGeneration(event.error || new Error("Worker crashed."));
+    const detail = event.message || event.error?.message || "";
+    const loc = event.filename ? ` at ${event.filename}:${event.lineno}` : "";
+    failGeneration(event.error || new Error(`Worker crashed.${detail ? " " + detail : ""}${loc}`));
   });
 
   worker.postMessage({
