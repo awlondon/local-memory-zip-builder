@@ -15,7 +15,7 @@ const STAGE_WEIGHTS = {
   archive_generation: 0.1
 };
 
-const WORKER_VERSION = "20260307-11";
+const WORKER_VERSION = "20260308-01";
 
 const STAGE_LABELS = {
   reading: "Reading input file...",

@@ -146,8 +146,11 @@ export function buildInstructionsFile() {
     "",
     "Notes:",
     "- This archive is retrieval-oriented metadata, not a fine-tuning dataset.",
+    "- Conversation-style JSON exports are normalized into explicit transcript turns when author role and content order can be recovered.",
+    "- When JSON input is partial or malformed, normalization keeps content-bearing role/text fields and filters high-noise metadata paths.",
     "- Explicit labels and metadata role markers take priority over turn alternation and session defaults.",
     "- speaker_inference_source indicates whether identity came from explicit text, metadata patterns, turn alternation, or session defaults.",
+    "- Section headings are structural and should not be counted as conversational turns.",
     "- symbolic/*.stream.jsonl is a retrieval contour with textpack references; reconstruction should come from textpack/.",
     "- Browser memory limits still apply for very large files.",
     "- For very large inputs, processing runs in sequential source parts; check generation_report.json source_parts for details."

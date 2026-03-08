@@ -5,7 +5,7 @@ import { extractConcepts } from "./concepts.js";
 import { buildGraphArtifacts } from "./graph.js";
 import { buildSymbolicStreams } from "./symbolic.js";
 import { buildTextpackBundle } from "./textpack.js";
-import { detectInputFormat, normalizeInputForRetrieval, rawInputShardPath } from "./ingest.js?v=20260307-10";
+import { detectInputFormat, normalizeInputForRetrieval, rawInputShardPath } from "./ingest.js?v=20260308-01";
 import {
   buildChunkManifest,
   buildConceptIndex,

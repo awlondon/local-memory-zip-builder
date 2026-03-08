@@ -8,6 +8,7 @@ A GitHub Pages-compatible browser app that converts a `.txt`, `.html`, or `.json
 - Accepts `.txt`, `.html/.htm`, and `.json` input
 - Uses a Web Worker for heavy processing
 - Splits oversized inputs into deterministic source parts and processes them sequentially
+- Normalizes conversation-style JSON exports into ordered transcript turns before chunking when explicit roles can be recovered
 - Sessionizes and chunks text using deterministic heuristics
 - Preserves speaker identity across blocks, sessions, chunks, symbolic streams, and textpack records
 - Extracts recurring concepts and concept/chunk/session links
@@ -60,6 +61,8 @@ local_memory/
 
 Chunk, session, symbolic, and textpack metadata now include speaker-aware fields such as `speaker_role`, `speaker_label`, `speaker_inference_source`, `speaker_confidence`, `turn_index`, and `turn_role`. The pipeline prefers explicit labels like `User:` / `Assistant:` first, then metadata-style role markers, then inferred turn alternation and session defaults when labels are weak or missing.
 
+For `.json` inputs, the builder now tries to preserve conversation structure instead of flattening everything into path/value noise. Chat-style exports with `mapping`, `messages`, `author.role`, and `content.parts` fields are rendered into ordered transcript turns such as `User:` / `Assistant:` / `Tool:` before sessionization. When a JSON slice is incomplete, the fallback keeps content-bearing fields and role markers while filtering high-noise metadata paths.
+
 ## Run locally
 
 1. Serve the repository with a static server (or use GitHub Pages).
@@ -86,6 +89,7 @@ A workflow is already included at `.github/workflows/deploy-pages.yml`.
 - Full chunk text is still preserved in `local_memory/chunks/chunk_text_part_*.jsonl` for grounded retrieval.
 - `speaker_confidence` is numeric and should be read together with `speaker_inference_source`; explicit labels and metadata markers are stronger than turn-based guesses.
 - When a chunk spans multiple speakers, `speaker_role` becomes `mixed` and `speaker_sequence_preview` shows the order that was preserved.
+- Conversation headings are structural only and do not count as conversational turns; `turn_index` and `turn_count` reflect actual message ownership.
 - Extremely large outputs can still take significant time during ZIP generation.
 - No external AI APIs or backend services are required.
 

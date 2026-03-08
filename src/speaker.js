@@ -1,8 +1,8 @@
 import { clamp, normalizeWhitespace, uniqueStrings } from "./utils.js";
 
 const ROLE_ORDER = ["human", "ai", "system", "tool", "unknown"];
-const EXPLICIT_SPEAKER_PATTERN = /^([A-Za-z][A-Za-z0-9_ .\-]{0,40})\s*:\s+\S/;
-const NON_ALTERNATING_BLOCK_TYPES = new Set(["code", "json", "quote"]);
+const EXPLICIT_SPEAKER_PATTERN = /^([A-Za-z][A-Za-z0-9_ .\-()]{0,60})\s*:\s+\S/;
+const NON_ALTERNATING_BLOCK_TYPES = new Set(["code", "json", "quote", "section"]);
 
 const ROLE_ALIASES = {
   human: ["user", "human", "person", "customer", "client", "altair"],
@@ -274,6 +274,12 @@ function buildTurns(blocks) {
   let currentTurn = null;
 
   for (const block of blocks) {
+    if (block.type === "section") {
+      block.turn_index = null;
+      block.turn_role = null;
+      continue;
+    }
+
     if (!currentTurn || shouldStartNewTurn(currentTurn, block)) {
       currentTurn = {
         turn_index: turns.length + 1,
