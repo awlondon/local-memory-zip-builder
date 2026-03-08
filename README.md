@@ -9,6 +9,7 @@ A GitHub Pages-compatible browser app that converts a `.txt`, `.html`, or `.json
 - Uses a Web Worker for heavy processing
 - Splits oversized inputs into deterministic source parts and processes them sequentially
 - Sessionizes and chunks text using deterministic heuristics
+- Preserves speaker identity across blocks, sessions, chunks, symbolic streams, and textpack records
 - Extracts recurring concepts and concept/chunk/session links
 - Builds graph and index artifacts as JSON/JSONL
 - Generates optional symbolic stream files per session
@@ -43,14 +44,21 @@ local_memory/
   chunks/
     chunk_text_part_000001.jsonl
     chunk_text_part_000002.jsonl
+  textpack/
+    textpack_manifest.json
+    textpack_000001.index.jsonl
+    textpack_000001.bin
   index/
     concept_index.json
     session_index.json
     keyword_index.json
     chunk_text_shards.json
+    textpack_shards.json
   instructions/
     README.txt
 ```
+
+Chunk, session, symbolic, and textpack metadata now include speaker-aware fields such as `speaker_role`, `speaker_label`, `speaker_inference_source`, `speaker_confidence`, `turn_index`, and `turn_role`. The pipeline prefers explicit labels like `User:` / `Assistant:` first, then metadata-style role markers, then inferred turn alternation and session defaults when labels are weak or missing.
 
 ## Run locally
 
@@ -76,6 +84,8 @@ A workflow is already included at `.github/workflows/deploy-pages.yml`.
 - Large files are split and processed part-by-part to reduce memory spikes.
 - In low-memory mode for very large inputs, symbolic streams and per-session raw shard files may be skipped to prevent browser OOM. For extremely large files, raw input parts may also be omitted from the ZIP.
 - Full chunk text is still preserved in `local_memory/chunks/chunk_text_part_*.jsonl` for grounded retrieval.
+- `speaker_confidence` is numeric and should be read together with `speaker_inference_source`; explicit labels and metadata markers are stronger than turn-based guesses.
+- When a chunk spans multiple speakers, `speaker_role` becomes `mixed` and `speaker_sequence_preview` shows the order that was preserved.
 - Extremely large outputs can still take significant time during ZIP generation.
 - No external AI APIs or backend services are required.
 

@@ -1,4 +1,4 @@
-﻿import { asJsonl, clamp } from "./utils.js";
+import { asJsonl, clamp } from "./utils.js";
 
 const GLYPHS = {
   architecture: "\u27C1",
@@ -55,6 +55,12 @@ export function buildSymbolicStreams(sessions, chunks, options = {}, onProgress 
         seq: index + 1,
         chunk_id: chunk.chunk_id,
         kind: chunk.kind,
+        speaker_role: chunk.speaker_role || "unknown",
+        speaker_label: chunk.speaker_label || null,
+        speaker_inference_source: chunk.speaker_inference_source || "unknown",
+        speaker_confidence: chunk.speaker_confidence || 0,
+        turn_index: Number.isFinite(chunk.turn_index) ? chunk.turn_index : null,
+        turn_role: chunk.turn_role || null,
         summary_glyph: glyphProfile.glyph,
         glyph_probability: glyphProfile.probability,
         concept_ids: (chunkConcepts[chunk.chunk_id] || []).slice(0, 8).map((entry) => entry.concept_id),

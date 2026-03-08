@@ -1,4 +1,5 @@
-﻿import { validateTextpackBundle } from "./reconstruct.js";
+import { validateTextpackBundle } from "./reconstruct.js";
+import { buildSpeakerSignature } from "./speaker.js";
 import {
   clamp,
   longestCommonPrefix,
@@ -73,9 +74,11 @@ export function buildTextpackBundle(chunks, chunkConcepts, options = {}) {
   for (let index = 0; index < chunks.length; index += 1) {
     const chunk = chunks[index];
     const textHash = stableHash(chunk.text);
+    const speakerSignature = buildSpeakerSignature(chunk);
+    const dedupeKey = `${textHash}:${speakerSignature}`;
 
-    if (recordByTextHash.has(textHash) && recordByTextHash.get(textHash).text === chunk.text) {
-      const existing = recordByTextHash.get(textHash);
+    if (recordByTextHash.has(dedupeKey) && recordByTextHash.get(dedupeKey).text === chunk.text) {
+      const existing = recordByTextHash.get(dedupeKey);
       chunkTextRefs[chunk.chunk_id] = makeTextRef(existing.record, shardPath);
       chunkPhraseMap[chunk.chunk_id] = existing.recordData.phrase_ids || [];
       continue;
@@ -98,12 +101,20 @@ export function buildTextpackBundle(chunks, chunkConcepts, options = {}) {
       base_record: Number.isFinite(recordData.base_record) ? recordData.base_record : null,
       patch_ops: recordData.patch_ops || [],
       text_hash: textHash,
-      artifact_version_id: artifactVersionByChunkId.get(chunk.chunk_id)?.artifact_version_id || null
+      artifact_version_id: artifactVersionByChunkId.get(chunk.chunk_id)?.artifact_version_id || null,
+      speaker_role: chunk.speaker_role || "unknown",
+      speaker_label: chunk.speaker_label || null,
+      speaker_inference_source: chunk.speaker_inference_source || "unknown",
+      speaker_confidence: chunk.speaker_confidence || 0,
+      turn_index: Number.isFinite(chunk.turn_index) ? chunk.turn_index : null,
+      turn_role: chunk.turn_role || null,
+      turn_count: chunk.turn_count || 1,
+      speaker_sequence_preview: chunk.speaker_sequence_preview || ""
     };
 
     records.push(finalRecord);
     expectedByRecord.set(recordNumber, chunk.text);
-    recordByTextHash.set(textHash, { record: recordNumber, text: chunk.text, recordData: finalRecord });
+    recordByTextHash.set(dedupeKey, { record: recordNumber, text: chunk.text, recordData: finalRecord });
     recentRecords.push({ record: recordNumber, text: chunk.text });
     if (recentRecords.length > RECENT_RECORD_WINDOW) {
       recentRecords.shift();
@@ -470,4 +481,3 @@ function makeTextRef(record, shard) {
     record
   };
 }
-

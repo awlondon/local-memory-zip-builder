@@ -1,6 +1,6 @@
-﻿import { tokenizeForSimilarity } from "./utils.js";
+import { resolveBlockSpeaker } from "./speaker.js";
+import { tokenizeForSimilarity } from "./utils.js";
 
-const SPEAKER_PATTERN = /^([A-Za-z][A-Za-z0-9_ .\-]{0,40}):\s/;
 const TIMESTAMP_PATTERN = /\b(?:\d{1,2}:\d{2}(?::\d{2})?\s?(?:AM|PM)?|\d{4}-\d{2}-\d{2}|\d{1,2}\/\d{1,2}\/\d{2,4})\b/i;
 
 export function parseTextToBlocks(text, onProgress = () => {}) {
@@ -39,8 +39,7 @@ export function parseTextToBlocks(text, onProgress = () => {}) {
       return;
     }
 
-    const firstLine = trimmed.split(/\r?\n/, 1)[0].trim();
-    const speakerMatch = firstLine.match(SPEAKER_PATTERN);
+    const speaker = resolveBlockSpeaker(trimmed, currentBlock.type);
 
     blocks.push({
       type: currentBlock.type,
@@ -48,7 +47,10 @@ export function parseTextToBlocks(text, onProgress = () => {}) {
       end_offset: currentBlock.end_offset - trailingWhitespace,
       text: trimmed,
       leading_blank_lines: currentBlock.leading_blank_lines,
-      speaker_label: speakerMatch ? speakerMatch[1].trim() : null,
+      speaker_label: speaker.speaker_label,
+      speaker_role: speaker.speaker_role,
+      speaker_inference_source: speaker.speaker_inference_source,
+      speaker_confidence: speaker.speaker_confidence,
       has_timestamp: TIMESTAMP_PATTERN.test(trimmed),
       token_set: tokenizeForSimilarity(trimmed)
     });

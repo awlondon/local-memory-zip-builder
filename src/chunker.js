@@ -1,4 +1,5 @@
-﻿import { clamp, makeId, normalizeWhitespace, splitSentencesWithOffsets, takeLeadingWords, uniqueStrings } from "./utils.js";
+import { isSpeakerSwitch, summarizeChunkSpeaker } from "./speaker.js";
+import { clamp, makeId, normalizeWhitespace, splitSentencesWithOffsets, takeLeadingWords, uniqueStrings } from "./utils.js";
 
 const CHUNK_SIZE_PROFILE = {
   small: { min: 120, target: 250, max: 420 },
@@ -38,6 +39,7 @@ export function chunkSessions(sessions, settings, onProgress = () => {}) {
       const artifactType = classifyArtifactType(text, currentUnits, sourceBlockTypes);
       const artifactLabel = artifactType ? extractArtifactLabel(text, artifactType) : null;
       const chunkId = makeId("chunk", chunkCounter++);
+      const speaker = summarizeChunkSpeaker(currentUnits);
       const chunk = {
         chunk_id: chunkId,
         session_id: session.session_id,
@@ -48,7 +50,15 @@ export function chunkSessions(sessions, settings, onProgress = () => {}) {
         kind: classifyChunk(text, currentUnits),
         source_block_types: sourceBlockTypes,
         artifact_type: artifactType,
-        artifact_label: artifactLabel
+        artifact_label: artifactLabel,
+        speaker_role: speaker.speaker_role,
+        speaker_label: speaker.speaker_label,
+        speaker_inference_source: speaker.speaker_inference_source,
+        speaker_confidence: speaker.speaker_confidence,
+        turn_index: speaker.turn_index,
+        turn_role: speaker.turn_role,
+        turn_count: speaker.turn_count,
+        speaker_sequence_preview: speaker.speaker_sequence_preview
       };
 
       chunks.push(chunk);
@@ -64,8 +74,14 @@ export function chunkSessions(sessions, settings, onProgress = () => {}) {
       const overflow = currentLength + unitLength > profile.max;
       const boundaryCue = looksLikeBoundary(unit.text);
       const enoughToFlush = currentLength >= profile.min;
+      const previousUnit = currentUnits[currentUnits.length - 1];
+      const speakerSwitch = previousUnit ? isSpeakerSwitch(previousUnit, unit) : false;
 
       if (currentUnits.length && overflow && enoughToFlush) {
+        flushChunk();
+      }
+
+      if (currentUnits.length && speakerSwitch) {
         flushChunk();
       }
 
@@ -106,28 +122,33 @@ function unitsFromSessionBlocks(blocks, profile) {
       block.type === "section" ||
       text.length <= profile.target * 1.5
     ) {
-      units.push({
-        text,
-        start_offset: block.start_offset,
-        end_offset: block.end_offset,
-        block_type: block.type
-      });
+      units.push(makeUnit(block, text, block.start_offset, block.end_offset));
       continue;
     }
 
     const sentenceUnits = splitSentencesWithOffsets(block.text, block.start_offset);
 
     for (const sentenceUnit of sentenceUnits) {
-      units.push({
-        text: sentenceUnit.text,
-        start_offset: sentenceUnit.start_offset,
-        end_offset: sentenceUnit.end_offset,
-        block_type: block.type
-      });
+      units.push(makeUnit(block, sentenceUnit.text, sentenceUnit.start_offset, sentenceUnit.end_offset));
     }
   }
 
   return units;
+}
+
+function makeUnit(block, text, startOffset, endOffset) {
+  return {
+    text,
+    start_offset: startOffset,
+    end_offset: endOffset,
+    block_type: block.type,
+    speaker_role: block.speaker_role || "unknown",
+    speaker_label: block.speaker_label || null,
+    speaker_inference_source: block.speaker_inference_source || "unknown",
+    speaker_confidence: block.speaker_confidence || 0,
+    turn_index: Number.isFinite(block.turn_index) ? block.turn_index : null,
+    turn_role: block.turn_role || block.speaker_role || "unknown"
+  };
 }
 
 function classifyChunk(text, units) {

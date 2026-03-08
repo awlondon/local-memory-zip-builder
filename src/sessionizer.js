@@ -1,3 +1,4 @@
+import { annotateSessionSpeakerTurns } from "./speaker.js";
 import { clamp, jaccardFromSets, makeId, safeTitle } from "./utils.js";
 
 const TARGET_SESSION_CHARS = {
@@ -27,8 +28,7 @@ export function sessionizeBlocks(blocks, fullText, settings, onProgress = () => 
     const endOffset = currentBlocks[currentBlocks.length - 1].end_offset;
     const sessionIndex = sessions.length + 1;
     const sessionText = fullText.slice(startOffset, endOffset);
-
-    sessions.push({
+    const session = {
       session_id: makeId("sess", sessionIndex),
       title: safeTitle(currentBlocks[0].text, `Session ${sessionIndex}`),
       start_offset: startOffset,
@@ -37,7 +37,10 @@ export function sessionizeBlocks(blocks, fullText, settings, onProgress = () => 
       blocks: currentBlocks,
       chunk_ids: [],
       concept_ids: []
-    });
+    };
+
+    annotateSessionSpeakerTurns(session);
+    sessions.push(session);
 
     currentBlocks = [];
     currentLength = 0;
@@ -87,8 +90,10 @@ function boundaryScore(previous, current, runningLength, targetChars) {
     score += 0.16;
   }
 
-  if (previous.speaker_label && current.speaker_label && previous.speaker_label !== current.speaker_label) {
-    score += 0.2;
+  if (speakerBoundary(previous, current)) {
+    score += 0.34;
+  } else if (previous.speaker_label && current.speaker_label && previous.speaker_label !== current.speaker_label) {
+    score += 0.18;
   }
 
   if (previous.type !== current.type && (previous.type !== "paragraph" || current.type !== "paragraph")) {
@@ -113,4 +118,26 @@ function boundaryScore(previous, current, runningLength, targetChars) {
   }
 
   return score;
+}
+
+function speakerBoundary(previous, current) {
+  if (!previous || !current) {
+    return false;
+  }
+
+  if (
+    previous.speaker_role &&
+    current.speaker_role &&
+    previous.speaker_role !== "unknown" &&
+    current.speaker_role !== "unknown" &&
+    previous.speaker_role !== current.speaker_role
+  ) {
+    return true;
+  }
+
+  return Boolean(
+    previous.speaker_label &&
+    current.speaker_label &&
+    previous.speaker_label !== current.speaker_label
+  );
 }

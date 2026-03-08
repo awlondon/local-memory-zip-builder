@@ -303,6 +303,14 @@ async function runPipeline({ file, settings }) {
           end_offset: chunk.end_offset,
           kind: chunk.kind,
           artifact_type: chunk.artifact_type || null,
+          speaker_role: chunk.speaker_role || "unknown",
+          speaker_label: chunk.speaker_label || null,
+          speaker_inference_source: chunk.speaker_inference_source || "unknown",
+          speaker_confidence: chunk.speaker_confidence || 0,
+          turn_index: Number.isFinite(chunk.turn_index) ? chunk.turn_index : null,
+          turn_role: chunk.turn_role || null,
+          turn_count: chunk.turn_count || 1,
+          speaker_sequence_preview: chunk.speaker_sequence_preview || "",
           text: chunk.text
         });
       }
@@ -389,7 +397,20 @@ async function runPipeline({ file, settings }) {
         start_offset: session.start_offset,
         end_offset: session.end_offset,
         chunk_ids: session.chunk_ids,
-        concept_ids: session.concept_ids
+        concept_ids: session.concept_ids,
+        turn_count: session.turn_count || 0,
+        speaker_profile: session.speaker_profile || "unknown",
+        session_speakers: session.session_speakers || [],
+        speaker_sequence_preview: session.speaker_sequence_preview || "",
+        dominant_human_label: session.dominant_human_label || null,
+        dominant_ai_label: session.dominant_ai_label || null,
+        speaker_role_counts: session.speaker_role_counts || null,
+        human_turn_count: session.human_turn_count || 0,
+        ai_turn_count: session.ai_turn_count || 0,
+        system_turn_count: session.system_turn_count || 0,
+        tool_turn_count: session.tool_turn_count || 0,
+        unknown_turn_count: session.unknown_turn_count || 0,
+        ai_turn_ratio: session.ai_turn_ratio || 0
       };
 
       if (!lowMemoryMode || allSessions.length < LOW_MEMORY_MAX_SESSION_RECORDS) {
@@ -415,6 +436,14 @@ async function runPipeline({ file, settings }) {
         text_preview: makePreview(chunk.text),
         artifact_type: chunk.artifact_type || null,
         artifact_label: chunk.artifact_label || null,
+        speaker_role: chunk.speaker_role || "unknown",
+        speaker_label: chunk.speaker_label || null,
+        speaker_inference_source: chunk.speaker_inference_source || "unknown",
+        speaker_confidence: chunk.speaker_confidence || 0,
+        turn_index: Number.isFinite(chunk.turn_index) ? chunk.turn_index : null,
+        turn_role: chunk.turn_role || null,
+        turn_count: chunk.turn_count || 1,
+        speaker_sequence_preview: chunk.speaker_sequence_preview || "",
         text_ref: partTextpackBundle?.chunkTextRefs[chunk.chunk_id] || null
       };
 

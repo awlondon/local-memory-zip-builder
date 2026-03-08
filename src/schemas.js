@@ -1,4 +1,4 @@
-﻿import { asJsonl } from "./utils.js";
+import { asJsonl } from "./utils.js";
 
 export function buildSessionManifest(sessions) {
   return asJsonl(
@@ -8,7 +8,15 @@ export function buildSessionManifest(sessions) {
       start_offset: session.start_offset,
       end_offset: session.end_offset,
       chunk_ids: session.chunk_ids,
-      concept_ids: session.concept_ids
+      concept_ids: session.concept_ids,
+      turn_count: session.turn_count || 0,
+      speaker_profile: session.speaker_profile || "unknown",
+      session_speakers: session.session_speakers || [],
+      speaker_sequence_preview: session.speaker_sequence_preview || "",
+      dominant_human_label: session.dominant_human_label || null,
+      dominant_ai_label: session.dominant_ai_label || null,
+      speaker_role_counts: session.speaker_role_counts || null,
+      ai_turn_ratio: session.ai_turn_ratio || 0
     }))
   );
 }
@@ -25,7 +33,15 @@ export function buildChunkManifest(chunks) {
       text_preview: chunk.text_preview || "",
       text_ref: chunk.text_ref || null,
       artifact_type: chunk.artifact_type || null,
-      artifact_label: chunk.artifact_label || null
+      artifact_label: chunk.artifact_label || null,
+      speaker_role: chunk.speaker_role || "unknown",
+      speaker_label: chunk.speaker_label || null,
+      speaker_inference_source: chunk.speaker_inference_source || "unknown",
+      speaker_confidence: chunk.speaker_confidence || 0,
+      turn_index: Number.isFinite(chunk.turn_index) ? chunk.turn_index : null,
+      turn_role: chunk.turn_role || null,
+      turn_count: chunk.turn_count || 1,
+      speaker_sequence_preview: chunk.speaker_sequence_preview || ""
     }))
   );
 }
@@ -52,7 +68,21 @@ export function buildSessionIndex(sessions) {
     chunk_count: session.chunk_ids.length,
     concept_count: session.concept_ids.length,
     start_offset: session.start_offset,
-    end_offset: session.end_offset
+    end_offset: session.end_offset,
+    turn_count: session.turn_count || 0,
+    speaker_profile: session.speaker_profile || "unknown",
+    has_human: (session.human_turn_count || 0) > 0,
+    has_ai: (session.ai_turn_count || 0) > 0,
+    human_turn_count: session.human_turn_count || 0,
+    ai_turn_count: session.ai_turn_count || 0,
+    system_turn_count: session.system_turn_count || 0,
+    tool_turn_count: session.tool_turn_count || 0,
+    unknown_turn_count: session.unknown_turn_count || 0,
+    ai_turn_ratio: session.ai_turn_ratio || 0,
+    dominant_human_label: session.dominant_human_label || null,
+    dominant_ai_label: session.dominant_ai_label || null,
+    session_speakers: session.session_speakers || [],
+    speaker_sequence_preview: session.speaker_sequence_preview || ""
   }));
 }
 
@@ -109,12 +139,15 @@ export function buildInstructionsFile() {
     "2) Keep the local_memory/ directory intact (do not rename internal folders).",
     "3) Point your local coding or LLM agent at local_memory/.",
     "4) Ask the agent to read manifest/corpus.json and index/*.json before opening large payload shards.",
-    "5) Prefer symbolic/*.stream.jsonl for fast retrieval cues and textpack/ for exact chunk reconstruction.",
-    "6) Use chunks/chunk_text_part_*.jsonl only as a compatibility fallback during the rollout window.",
-    "7) Let the agent open raw session shards only for grounded span-level inspection when they are present.",
+    "5) Prefer speaker_role, turn_role, speaker_inference_source, and speaker_confidence before re-inferring identity from raw text.",
+    "6) Use symbolic/*.stream.jsonl for fast retrieval cues and textpack/ for exact chunk reconstruction, including speaker metadata.",
+    "7) Open chunks/chunk_text_part_*.jsonl only as a compatibility fallback or when speaker_role is unknown or mixed.",
+    "8) Open raw session shards only for grounded span-level inspection when they are present.",
     "",
     "Notes:",
     "- This archive is retrieval-oriented metadata, not a fine-tuning dataset.",
+    "- Explicit labels and metadata role markers take priority over turn alternation and session defaults.",
+    "- speaker_inference_source indicates whether identity came from explicit text, metadata patterns, turn alternation, or session defaults.",
     "- symbolic/*.stream.jsonl is a retrieval contour with textpack references; reconstruction should come from textpack/.",
     "- Browser memory limits still apply for very large files.",
     "- For very large inputs, processing runs in sequential source parts; check generation_report.json source_parts for details."
