@@ -149,6 +149,13 @@ async function runPipeline({ file, settings }) {
   const textpackShardPaths = [];
   const textpackShardEntries = [];
 
+  const textpackChunkTextRefs = Object.create(null);
+  const textpackChunkPhraseMap = Object.create(null);
+  const textpackArtifacts = [];
+  const textpackValidations = [];
+  const textpackStats = { raw_text_bytes: 0, textpack_literal_bytes: 0, lexicon_entries: 0, template_entries: 0, artifact_versions: 0 };
+  let lastTextpackManifestPath = null;
+
   const counters = {
     session: 1,
     chunk: 1,
@@ -307,10 +314,63 @@ async function runPipeline({ file, settings }) {
       allSessions.push(lightweightSession);
     }
 
+    // ── Per-part textpack encoding (before accumulating chunks) ──
+    if (includeTextpack) {
+      const partBundleId = i + 1;
+      const multiPart = partPlan.length > 1;
+      const partChunkConcepts = Object.create(null);
+      for (const chunk of remapped.chunks) {
+        if (remapped.chunkConcepts[chunk.chunk_id]) {
+          partChunkConcepts[chunk.chunk_id] = remapped.chunkConcepts[chunk.chunk_id];
+        }
+      }
+
+      const bundle = buildTextpackBundle(remapped.chunks, partChunkConcepts, {
+        bundleId: partBundleId,
+        enableDeltaEncoding: settings.enableDeltaEncoding !== false,
+        forceShardScopedAuxPaths: multiPart,
+        onArtifactProgress: (fraction) => {
+          emitProgress("artifact_promotion", aggregatePartProgress(i, partPlan.length, fraction), "Promoting structured artifacts...");
+        },
+        onEncodingProgress: (fraction) => {
+          emitProgress("textpack_build", aggregatePartProgress(i, partPlan.length, fraction), `Encoding textpack part ${partLabel}...`);
+        }
+      });
+
+      for (const fileEntry of bundle.files) {
+        enqueueFile(fileEntry);
+      }
+      flushPendingFiles();
+
+      textpackShardPaths.push(...bundle.shardPaths);
+      textpackShardEntries.push(...bundle.manifest.shards.map((shard) => ({
+        ...shard,
+        lexicon_path: bundle.manifest.dictionary.lexicon_path,
+        templates_path: bundle.manifest.dictionary.templates_path,
+        manifest_path: bundle.manifestPath
+      })));
+      Object.assign(textpackChunkTextRefs, bundle.chunkTextRefs);
+      Object.assign(textpackChunkPhraseMap, bundle.chunkPhraseMap);
+      textpackArtifacts.push(...bundle.artifacts);
+      textpackValidations.push(bundle.validation);
+      textpackStats.raw_text_bytes += bundle.stats.raw_text_bytes;
+      textpackStats.textpack_literal_bytes += bundle.stats.textpack_literal_bytes;
+      textpackStats.lexicon_entries += bundle.stats.lexicon_entries;
+      textpackStats.template_entries += bundle.stats.template_entries;
+      textpackStats.artifact_versions += bundle.stats.artifact_versions;
+      lastTextpackManifestPath = bundle.manifestPath;
+    }
+
+    // ── Trim chunk text after textpack captures it, then accumulate ──
+    const TEXT_TRIM_LIMIT = 1200;
     for (const chunk of remapped.chunks) {
+      if (chunk.text.length > TEXT_TRIM_LIMIT) {
+        chunk.text = chunk.text.slice(0, TEXT_TRIM_LIMIT);
+      }
+
       allFullChunks.push(chunk);
 
-      const manifestChunk = {
+      manifestChunks.push({
         chunk_id: chunk.chunk_id,
         session_id: chunk.session_id,
         seq_in_session: chunk.seq_in_session,
@@ -329,9 +389,7 @@ async function runPipeline({ file, settings }) {
         turn_count: chunk.turn_count || 1,
         speaker_sequence_preview: chunk.speaker_sequence_preview || "",
         text_ref: null
-      };
-
-      manifestChunks.push(manifestChunk);
+      });
     }
 
     for (const concept of remapped.concepts) {
@@ -349,135 +407,18 @@ async function runPipeline({ file, settings }) {
     throw new Error("No retrievable text found after parsing input.");
   }
 
-  emitProgress("artifact_promotion", 0, "Promoting structured artifacts...");
-  emitProgress("textpack_build", 0, "Encoding textpack payloads...");
-
-  let textpackBundle = null;
-  if (includeTextpack) {
-    const TEXTPACK_SHARD_SIZE = 10_000;
-    if (allFullChunks.length <= TEXTPACK_SHARD_SIZE) {
-      textpackBundle = buildTextpackBundle(allFullChunks, allChunkConcepts, {
-        bundleId: 1,
-        enableDeltaEncoding: settings.enableDeltaEncoding !== false,
-        onArtifactProgress: (fraction) => emitProgress("artifact_promotion", fraction, "Promoting structured artifacts..."),
-        onEncodingProgress: (fraction) => emitProgress("textpack_build", fraction, "Encoding textpack payloads...")
-      });
-      for (const fileEntry of textpackBundle.files) {
-        enqueueFile(fileEntry);
-      }
-      flushPendingFiles();
-      textpackBundle.files = [];
-    } else {
-      const shardCount = Math.ceil(allFullChunks.length / TEXTPACK_SHARD_SIZE);
-      const mergedShardPaths = [];
-      const mergedShardEntries = [];
-      const mergedChunkTextRefs = Object.create(null);
-      const mergedChunkPhraseMap = Object.create(null);
-      const mergedArtifacts = [];
-      const mergedValidations = [];
-      const mergedStats = { raw_text_bytes: 0, textpack_literal_bytes: 0, lexicon_entries: 0, template_entries: 0, artifact_versions: 0 };
-      let lastManifestPath = null;
-
-      for (let s = 0; s < shardCount; s += 1) {
-        const start = s * TEXTPACK_SHARD_SIZE;
-        const end = Math.min(start + TEXTPACK_SHARD_SIZE, allFullChunks.length);
-        const shardChunks = allFullChunks.slice(start, end);
-        const shardConcepts = Object.create(null);
-        for (const chunk of shardChunks) {
-          if (allChunkConcepts[chunk.chunk_id]) {
-            shardConcepts[chunk.chunk_id] = allChunkConcepts[chunk.chunk_id];
-          }
-        }
-
-        const bundle = buildTextpackBundle(shardChunks, shardConcepts, {
-          bundleId: s + 1,
-          enableDeltaEncoding: settings.enableDeltaEncoding !== false,
-          forceShardScopedAuxPaths: shardCount > 1,
-          onArtifactProgress: (fraction) => {
-            const overall = (s + fraction) / shardCount;
-            emitProgress("artifact_promotion", overall, "Promoting structured artifacts...");
-          },
-          onEncodingProgress: (fraction) => {
-            const overall = (s + fraction) / shardCount;
-            emitProgress("textpack_build", overall, `Encoding textpack shard ${s + 1}/${shardCount}...`);
-          }
-        });
-
-        for (const fileEntry of bundle.files) {
-          enqueueFile(fileEntry);
-        }
-        flushPendingFiles();
-
-        mergedShardPaths.push(...bundle.shardPaths);
-        mergedShardEntries.push(...bundle.manifest.shards.map((shard) => ({
-          ...shard,
-          lexicon_path: bundle.manifest.dictionary.lexicon_path,
-          templates_path: bundle.manifest.dictionary.templates_path,
-          manifest_path: bundle.manifestPath
-        })));
-        Object.assign(mergedChunkTextRefs, bundle.chunkTextRefs);
-        Object.assign(mergedChunkPhraseMap, bundle.chunkPhraseMap);
-        mergedArtifacts.push(...bundle.artifacts);
-        mergedValidations.push(bundle.validation);
-        mergedStats.raw_text_bytes += bundle.stats.raw_text_bytes;
-        mergedStats.textpack_literal_bytes += bundle.stats.textpack_literal_bytes;
-        mergedStats.lexicon_entries += bundle.stats.lexicon_entries;
-        mergedStats.template_entries += bundle.stats.template_entries;
-        mergedStats.artifact_versions += bundle.stats.artifact_versions;
-        lastManifestPath = bundle.manifestPath;
-
-        await pause();
-      }
-
-      textpackBundle = {
-        files: [],
-        manifest: {
-          shards: mergedShardEntries,
-          dictionary: { lexicon_path: null, templates_path: null }
-        },
-        manifestPath: lastManifestPath,
-        shardPaths: mergedShardPaths,
-        chunkTextRefs: mergedChunkTextRefs,
-        chunkPhraseMap: mergedChunkPhraseMap,
-        artifacts: mergedArtifacts,
-        validation: mergedValidations.length === 1 ? mergedValidations[0] : { passed: mergedValidations.every((v) => v.passed), shards: mergedValidations },
-        stats: mergedStats
-      };
-    }
-  }
   emitProgress("artifact_promotion", 1, "Structured artifacts promoted.");
   emitProgress("textpack_build", 1, includeTextpack ? "Textpack payloads encoded." : "Textpack disabled.");
   emitProgress("textpack_validate", 1, includeTextpack ? "Textpack reconstruction validated." : "Textpack validation skipped.");
 
-  const TEXT_TRIM_LIMIT = 1200;
-  for (const chunk of allFullChunks) {
-    if (chunk.text.length > TEXT_TRIM_LIMIT) {
-      chunk.text = chunk.text.slice(0, TEXT_TRIM_LIMIT);
-    }
-  }
-
-  const textpackValidationSummaries = [];
-  const textpackStatsSummaries = [];
-  let totalArtifactVersionsProcessed = 0;
-  let artifactVersions = [];
-
-  if (textpackBundle) {
-    textpackShardPaths.push(...textpackBundle.shardPaths);
-    textpackShardEntries.push(...textpackBundle.manifest.shards.map((shard) => ({
-      ...shard,
-      lexicon_path: shard.lexicon_path || textpackBundle.manifest.dictionary.lexicon_path,
-      templates_path: shard.templates_path || textpackBundle.manifest.dictionary.templates_path,
-      manifest_path: shard.manifest_path || textpackBundle.manifestPath
-    })));
-    textpackValidationSummaries.push(textpackBundle.validation);
-    textpackStatsSummaries.push(textpackBundle.stats);
-    totalArtifactVersionsProcessed = textpackBundle.artifacts.length;
-    artifactVersions = textpackBundle.artifacts;
-  }
+  const textpackValidationSummaries = textpackValidations.length ? textpackValidations : [];
+  const textpackStatsSummaries = textpackStats.raw_text_bytes > 0 ? [textpackStats] : [];
+  let totalArtifactVersionsProcessed = textpackArtifacts.length;
+  let artifactVersions = textpackArtifacts;
 
   for (const manifestChunk of manifestChunks) {
-    if (textpackBundle?.chunkTextRefs[manifestChunk.chunk_id]) {
-      manifestChunk.text_ref = textpackBundle.chunkTextRefs[manifestChunk.chunk_id];
+    if (textpackChunkTextRefs[manifestChunk.chunk_id]) {
+      manifestChunk.text_ref = textpackChunkTextRefs[manifestChunk.chunk_id];
     } else if (includeLegacyChunkText) {
       manifestChunk.text_ref = { mode: "legacy_chunk_text", shard: "local_memory/chunks", record: manifestChunk.chunk_id };
     }
@@ -490,7 +431,7 @@ async function runPipeline({ file, settings }) {
       chunks: allFullChunks,
       concepts: allConcepts,
       chunkConcepts: allChunkConcepts,
-      artifacts: textpackBundle?.artifacts || []
+      artifacts: textpackArtifacts
     },
     (fraction) => emitProgress("graph_build", fraction, "Building graph artifacts...")
   );
@@ -508,9 +449,9 @@ async function runPipeline({ file, settings }) {
       allFullChunks,
       {
         chunkConcepts: allChunkConcepts,
-        chunkPhraseMap: textpackBundle?.chunkPhraseMap || Object.create(null),
-        chunkTextRefs: textpackBundle?.chunkTextRefs || Object.create(null),
-        artifacts: textpackBundle?.artifacts || [],
+        chunkPhraseMap: textpackChunkPhraseMap,
+        chunkTextRefs: textpackChunkTextRefs,
+        artifacts: textpackArtifacts,
         conceptToSymbol: symbolLibrary.conceptToSymbol
       },
       (fraction) => emitProgress("symbolic_streams", fraction, "Generating symbolic streams...")
@@ -552,10 +493,10 @@ async function runPipeline({ file, settings }) {
     estimatedDurationMs,
     warnings,
     limits,
-    textpack: textpackBundle
+    textpack: includeTextpack && textpackStatsSummaries.length
       ? {
         enabled: true,
-        mode: "global",
+        mode: "per_part",
         validation: summarizeTextpackValidation(textpackValidationSummaries),
         stats: summarizeTextpackStats(textpackStatsSummaries)
       }
@@ -633,12 +574,6 @@ async function runPipeline({ file, settings }) {
     path: "local_memory/index/textpack_shards.json",
     content: JSON.stringify(textpackShardPaths, null, 2)
   });
-
-  if (textpackBundle) {
-    for (const fileEntry of textpackBundle.files) {
-      enqueueFile(fileEntry);
-    }
-  }
 
   if (symbolLibrary.symbols.length) {
     enqueueFile({
