@@ -37,6 +37,9 @@ export function createUIController() {
     includeLegacyChunkText: document.getElementById("include-legacy-chunk-text"),
     includeRaw: document.getElementById("include-raw"),
     generateBtn: document.getElementById("generate-btn"),
+    splitBtn: document.getElementById("split-btn"),
+    splitOutput: document.getElementById("split-output"),
+    splitLinks: document.getElementById("split-links"),
     downloadBtn: document.getElementById("download-btn"),
     progress: document.getElementById("progress"),
     progressLabel: document.getElementById("progress-label"),
@@ -48,16 +51,30 @@ export function createUIController() {
 
   let selectedFile = null;
 
+  const SPLIT_THRESHOLD = 250 * 1024 * 1024;
+
   function applyFileSelection(file) {
     selectedFile = file ?? null;
+    elements.splitOutput.classList.add("hidden");
+    elements.splitLinks.innerHTML = "";
+
     if (!selectedFile) {
       elements.selectedFile.textContent = "No file selected.";
       elements.dropLabel.textContent = "Drop .txt file here or click to browse";
+      elements.splitBtn.classList.add("hidden");
       return;
     }
 
     elements.selectedFile.textContent = `Selected: ${selectedFile.name} (${formatBytes(selectedFile.size)})`;
     elements.dropLabel.textContent = `Ready: ${selectedFile.name}`;
+
+    if (selectedFile.size > SPLIT_THRESHOLD) {
+      const partCount = Math.ceil(selectedFile.size / SPLIT_THRESHOLD);
+      elements.splitBtn.textContent = `Split into ${partCount} files (~${formatBytes(SPLIT_THRESHOLD)} each)`;
+      elements.splitBtn.classList.remove("hidden");
+    } else {
+      elements.splitBtn.classList.add("hidden");
+    }
   }
 
   function bindInputEvents() {
@@ -169,6 +186,24 @@ export function createUIController() {
     elements.generateBtn.addEventListener("click", () => handler());
   }
 
+  function onSplit(handler) {
+    elements.splitBtn.addEventListener("click", () => handler());
+  }
+
+  function showSplitLinks(links) {
+    elements.splitLinks.innerHTML = "";
+
+    for (const link of links) {
+      const a = document.createElement("a");
+      a.href = link.url;
+      a.download = link.filename;
+      a.textContent = `${link.filename} (${formatBytes(link.size)})`;
+      elements.splitLinks.appendChild(a);
+    }
+
+    elements.splitOutput.classList.remove("hidden");
+  }
+
   function getSelectedFile() {
     return selectedFile;
   }
@@ -179,6 +214,8 @@ export function createUIController() {
     getSelectedFile,
     getSettings,
     onGenerate,
+    onSplit,
+    showSplitLinks,
     setBusy,
     setProgress,
     setTiming,

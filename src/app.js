@@ -53,6 +53,39 @@ ui.onGenerate(() => {
   });
 });
 
+const splitObjectUrls = [];
+
+ui.onSplit(() => {
+  const file = ui.getSelectedFile();
+  if (!file) {
+    return;
+  }
+
+  for (const url of splitObjectUrls) {
+    URL.revokeObjectURL(url);
+  }
+  splitObjectUrls.length = 0;
+
+  const SPLIT_SIZE = 250 * 1024 * 1024;
+  const partCount = Math.ceil(file.size / SPLIT_SIZE);
+  const baseName = file.name.replace(/\.[^.]+$/, "");
+  const ext = file.name.includes(".") ? file.name.slice(file.name.lastIndexOf(".")) : "";
+  const links = [];
+
+  for (let i = 0; i < partCount; i++) {
+    const start = i * SPLIT_SIZE;
+    const end = Math.min(start + SPLIT_SIZE, file.size);
+    const blob = file.slice(start, end, file.type || "application/octet-stream");
+    const url = URL.createObjectURL(blob);
+    const filename = `${baseName}_part${i + 1}_of_${partCount}${ext}`;
+    splitObjectUrls.push(url);
+    links.push({ url, filename, size: end - start });
+  }
+
+  ui.showSplitLinks(links);
+  ui.setStatus(`File split into ${partCount} parts. Download each and process individually.`);
+});
+
 async function startGeneration() {
   if (state.running) {
     return;

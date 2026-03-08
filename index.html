@@ -73,7 +73,14 @@
 
     <section class="card actions">
       <button id="generate-btn" class="primary">Generate ZIP</button>
+      <button id="split-btn" class="secondary hidden">Split into smaller files</button>
       <a id="download-btn" class="secondary hidden" download>Download ZIP</a>
+    </section>
+
+    <section id="split-output" class="card hidden">
+      <h2>Split files</h2>
+      <p class="help">Download each part below, then process them one at a time through the builder above.</p>
+      <div id="split-links" class="split-links"></div>
     </section>
 
     <section class="card">
