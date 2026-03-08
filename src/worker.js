@@ -338,14 +338,92 @@ async function runPipeline({ file, settings }) {
 
   emitProgress("artifact_promotion", 0, "Promoting structured artifacts...");
   emitProgress("textpack_build", 0, "Encoding textpack payloads...");
-  const textpackBundle = includeTextpack
-    ? buildTextpackBundle(allFullChunks, allChunkConcepts, {
-      bundleId: 1,
-      enableDeltaEncoding: settings.enableDeltaEncoding !== false,
-      onArtifactProgress: (fraction) => emitProgress("artifact_promotion", fraction, "Promoting structured artifacts..."),
-      onEncodingProgress: (fraction) => emitProgress("textpack_build", fraction, "Encoding textpack payloads...")
-    })
-    : null;
+
+  let textpackBundle = null;
+  if (includeTextpack) {
+    const TEXTPACK_SHARD_SIZE = 10_000;
+    if (allFullChunks.length <= TEXTPACK_SHARD_SIZE) {
+      textpackBundle = buildTextpackBundle(allFullChunks, allChunkConcepts, {
+        bundleId: 1,
+        enableDeltaEncoding: settings.enableDeltaEncoding !== false,
+        onArtifactProgress: (fraction) => emitProgress("artifact_promotion", fraction, "Promoting structured artifacts..."),
+        onEncodingProgress: (fraction) => emitProgress("textpack_build", fraction, "Encoding textpack payloads...")
+      });
+    } else {
+      const shardCount = Math.ceil(allFullChunks.length / TEXTPACK_SHARD_SIZE);
+      const mergedFiles = [];
+      const mergedShardPaths = [];
+      const mergedShardEntries = [];
+      const mergedChunkTextRefs = Object.create(null);
+      const mergedChunkPhraseMap = Object.create(null);
+      const mergedArtifacts = [];
+      const mergedValidations = [];
+      const mergedStats = { raw_text_bytes: 0, textpack_literal_bytes: 0, lexicon_entries: 0, template_entries: 0, artifact_versions: 0 };
+      let lastManifestPath = null;
+
+      for (let s = 0; s < shardCount; s += 1) {
+        const start = s * TEXTPACK_SHARD_SIZE;
+        const end = Math.min(start + TEXTPACK_SHARD_SIZE, allFullChunks.length);
+        const shardChunks = allFullChunks.slice(start, end);
+        const shardConcepts = Object.create(null);
+        for (const chunk of shardChunks) {
+          if (allChunkConcepts[chunk.chunk_id]) {
+            shardConcepts[chunk.chunk_id] = allChunkConcepts[chunk.chunk_id];
+          }
+        }
+
+        const bundle = buildTextpackBundle(shardChunks, shardConcepts, {
+          bundleId: s + 1,
+          enableDeltaEncoding: settings.enableDeltaEncoding !== false,
+          forceShardScopedAuxPaths: shardCount > 1,
+          onArtifactProgress: (fraction) => {
+            const overall = (s + fraction) / shardCount;
+            emitProgress("artifact_promotion", overall, "Promoting structured artifacts...");
+          },
+          onEncodingProgress: (fraction) => {
+            const overall = (s + fraction) / shardCount;
+            emitProgress("textpack_build", overall, `Encoding textpack shard ${s + 1}/${shardCount}...`);
+          }
+        });
+
+        mergedFiles.push(...bundle.files);
+        mergedShardPaths.push(...bundle.shardPaths);
+        mergedShardEntries.push(...bundle.manifest.shards.map((shard) => ({
+          ...shard,
+          lexicon_path: bundle.manifest.dictionary.lexicon_path,
+          templates_path: bundle.manifest.dictionary.templates_path,
+          manifest_path: bundle.manifestPath
+        })));
+        Object.assign(mergedChunkTextRefs, bundle.chunkTextRefs);
+        Object.assign(mergedChunkPhraseMap, bundle.chunkPhraseMap);
+        mergedArtifacts.push(...bundle.artifacts);
+        mergedValidations.push(bundle.validation);
+        mergedStats.raw_text_bytes += bundle.stats.raw_text_bytes;
+        mergedStats.textpack_literal_bytes += bundle.stats.textpack_literal_bytes;
+        mergedStats.lexicon_entries += bundle.stats.lexicon_entries;
+        mergedStats.template_entries += bundle.stats.template_entries;
+        mergedStats.artifact_versions += bundle.stats.artifact_versions;
+        lastManifestPath = bundle.manifestPath;
+
+        await pause();
+      }
+
+      textpackBundle = {
+        files: mergedFiles,
+        manifest: {
+          shards: mergedShardEntries,
+          dictionary: { lexicon_path: null, templates_path: null }
+        },
+        manifestPath: lastManifestPath,
+        shardPaths: mergedShardPaths,
+        chunkTextRefs: mergedChunkTextRefs,
+        chunkPhraseMap: mergedChunkPhraseMap,
+        artifacts: mergedArtifacts,
+        validation: mergedValidations.length === 1 ? mergedValidations[0] : { passed: mergedValidations.every((v) => v.passed), shards: mergedValidations },
+        stats: mergedStats
+      };
+    }
+  }
   emitProgress("artifact_promotion", 1, "Structured artifacts promoted.");
   emitProgress("textpack_build", 1, includeTextpack ? "Textpack payloads encoded." : "Textpack disabled.");
   emitProgress("textpack_validate", 1, includeTextpack ? "Textpack reconstruction validated." : "Textpack validation skipped.");
@@ -359,9 +437,9 @@ async function runPipeline({ file, settings }) {
     textpackShardPaths.push(...textpackBundle.shardPaths);
     textpackShardEntries.push(...textpackBundle.manifest.shards.map((shard) => ({
       ...shard,
-      lexicon_path: textpackBundle.manifest.dictionary.lexicon_path,
-      templates_path: textpackBundle.manifest.dictionary.templates_path,
-      manifest_path: textpackBundle.manifestPath
+      lexicon_path: shard.lexicon_path || textpackBundle.manifest.dictionary.lexicon_path,
+      templates_path: shard.templates_path || textpackBundle.manifest.dictionary.templates_path,
+      manifest_path: shard.manifest_path || textpackBundle.manifestPath
     })));
     textpackValidationSummaries.push(textpackBundle.validation);
     textpackStatsSummaries.push(textpackBundle.stats);
