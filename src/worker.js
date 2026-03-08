@@ -5,6 +5,8 @@ import { extractConcepts } from "./concepts.js";
 import { buildGraphArtifacts } from "./graph.js";
 import { buildSymbolicStreams } from "./symbolic.js";
 import { buildTextpackBundle } from "./textpack.js";
+import { buildSymbolLibrary } from "./symbol-library.js";
+import { buildQueryProtocol } from "./query.js";
 import { detectInputFormat, normalizeInputForRetrieval, rawInputShardPath } from "./ingest.js?v=20260308-01";
 import {
   buildChunkManifest,
@@ -503,6 +505,8 @@ async function runPipeline({ file, settings }) {
         }
       }
 
+      const partSymbolLibrary = buildSymbolLibrary(remapped.concepts, remapped.chunkConcepts, partGraph.edges);
+
       if (includeSymbolic) {
         emitProgress(
           "symbolic_streams",
@@ -516,7 +520,8 @@ async function runPipeline({ file, settings }) {
             chunkConcepts: remapped.chunkConcepts,
             chunkPhraseMap: partTextpackBundle?.chunkPhraseMap || Object.create(null),
             chunkTextRefs: partTextpackBundle?.chunkTextRefs || Object.create(null),
-            artifacts: partTextpackBundle?.artifacts || []
+            artifacts: partTextpackBundle?.artifacts || [],
+            conceptToSymbol: partSymbolLibrary.conceptToSymbol
           },
           (fraction) => emitProgress(
             "symbolic_streams",
@@ -615,6 +620,8 @@ async function runPipeline({ file, settings }) {
       }
     }
 
+    const symbolLibrary = buildSymbolLibrary(allConcepts, allChunkConcepts, allEdges);
+
     emitProgress("symbolic_streams", 0, "Generating symbolic streams...");
     if (includeSymbolic) {
       const symbolicFiles = buildSymbolicStreams(
@@ -624,7 +631,8 @@ async function runPipeline({ file, settings }) {
           chunkConcepts: allChunkConcepts,
           chunkPhraseMap: textpackBundle?.chunkPhraseMap || Object.create(null),
           chunkTextRefs: textpackBundle?.chunkTextRefs || Object.create(null),
-          artifacts: textpackBundle?.artifacts || []
+          artifacts: textpackBundle?.artifacts || [],
+          conceptToSymbol: symbolLibrary.conceptToSymbol
         },
         (fraction) => emitProgress("symbolic_streams", fraction, "Generating symbolic streams...")
       );
@@ -647,6 +655,8 @@ async function runPipeline({ file, settings }) {
       }
     }
   }
+
+  const finalSymbolLibrary = buildSymbolLibrary(allConcepts, allChunkConcepts, allEdges);
 
   emitProgress("finalize", 0, "Preparing output files...");
 
@@ -693,6 +703,17 @@ async function runPipeline({ file, settings }) {
     bytes_per_part: partByteSize,
     format: inputFormat
   };
+
+  const textpackStats = summarizeTextpackStats(textpackStatsSummaries);
+  if (textpackStats.raw_text_bytes > 0 && textpackStats.textpack_literal_bytes > 0) {
+    generationReport.compression = {
+      raw_text_bytes: textpackStats.raw_text_bytes,
+      textpack_literal_bytes: textpackStats.textpack_literal_bytes,
+      compression_ratio: Number((textpackStats.raw_text_bytes / textpackStats.textpack_literal_bytes).toFixed(2))
+    };
+  }
+
+  generationReport.symbol_library = finalSymbolLibrary.capacity;
 
   enqueueFile({ path: "local_memory/manifest/corpus.json", content: JSON.stringify(corpusManifest, null, 2) });
   enqueueFile({ path: "local_memory/manifest/sessions.jsonl", content: buildSessionManifest(allSessions) });
@@ -785,6 +806,32 @@ async function runPipeline({ file, settings }) {
       enqueueFile(fileEntry);
     }
   }
+
+  if (finalSymbolLibrary.symbols.length) {
+    enqueueFile({
+      path: "local_memory/symbolic/symbol_library.json",
+      content: JSON.stringify({
+        version: 1,
+        capacity: finalSymbolLibrary.capacity,
+        symbols: finalSymbolLibrary.symbols
+      }, null, 2)
+    });
+  }
+
+  const queryProtocol = buildQueryProtocol({
+    concepts: allConcepts,
+    edges: allEdges,
+    symbols: finalSymbolLibrary.symbols,
+    conceptToSymbol: finalSymbolLibrary.conceptToSymbol,
+    sessions: allSessions,
+    totalChunks: totalChunksProcessed,
+    rawTextBytes: bytes,
+    archiveBytes: generationReport.compression?.textpack_literal_bytes || 0
+  });
+  enqueueFile({
+    path: "local_memory/index/query_protocol.json",
+    content: JSON.stringify(queryProtocol, null, 2)
+  });
 
   enqueueFile({
     path: "local_memory/instructions/README.txt",
