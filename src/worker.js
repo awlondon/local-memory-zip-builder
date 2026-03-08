@@ -428,6 +428,13 @@ async function runPipeline({ file, settings }) {
   emitProgress("textpack_build", 1, includeTextpack ? "Textpack payloads encoded." : "Textpack disabled.");
   emitProgress("textpack_validate", 1, includeTextpack ? "Textpack reconstruction validated." : "Textpack validation skipped.");
 
+  const TEXT_TRIM_LIMIT = 1200;
+  for (const chunk of allFullChunks) {
+    if (chunk.text.length > TEXT_TRIM_LIMIT) {
+      chunk.text = chunk.text.slice(0, TEXT_TRIM_LIMIT);
+    }
+  }
+
   const textpackValidationSummaries = [];
   const textpackStatsSummaries = [];
   let totalArtifactVersionsProcessed = 0;
