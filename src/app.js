@@ -66,7 +66,7 @@ ui.onSplit(() => {
   }
   splitObjectUrls.length = 0;
 
-  const SPLIT_SIZE = 250 * 1024 * 1024;
+  const SPLIT_SIZE = 190 * 1024 * 1024;
   const partCount = Math.ceil(file.size / SPLIT_SIZE);
   const baseName = file.name.replace(/\.[^.]+$/, "");
   const ext = file.name.includes(".") ? file.name.slice(file.name.lastIndexOf(".")) : "";
