@@ -51,7 +51,7 @@ export function createUIController() {
 
   let selectedFile = null;
 
-  const SPLIT_THRESHOLD = 250 * 1024 * 1024;
+  const SPLIT_THRESHOLD = 190 * 1024 * 1024;
 
   function applyFileSelection(file) {
     selectedFile = file ?? null;
