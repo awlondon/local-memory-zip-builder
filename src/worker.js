@@ -90,10 +90,23 @@ async function runPipeline({ file, settings }) {
     );
   }
 
-  const includeRaw = settings.includeRaw !== false;
-  const includeLegacyChunkText = settings.includeLegacyChunkText !== false;
+  const LARGE_INPUT_BYTES = 200 * 1024 * 1024;
+  const isLargeInput = bytes > LARGE_INPUT_BYTES;
+
+  let includeRaw = settings.includeRaw !== false;
+  let includeLegacyChunkText = settings.includeLegacyChunkText !== false;
   const includeSymbolic = settings.includeSymbolic !== false;
   const includeTextpack = true;
+
+  if (isLargeInput && includeRaw) {
+    includeRaw = false;
+    pushWarning("Raw input file inclusion disabled for large inputs (>200 MB) to stay within browser memory limits. Textpack preserves all text for reconstruction.");
+  }
+
+  if (isLargeInput && includeLegacyChunkText) {
+    includeLegacyChunkText = false;
+    pushWarning("Legacy chunk text shards disabled for large inputs (>200 MB). Textpack encoding provides equivalent reversible text storage.");
+  }
 
   if (settings.includeTextpack === false) {
     pushWarning("Textpack output is required for reversible reconstruction in this build and will remain enabled.");
