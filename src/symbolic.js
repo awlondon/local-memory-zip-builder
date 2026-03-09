@@ -33,6 +33,7 @@ export function buildSymbolicStreams(sessions, chunks, options = {}, onProgress 
   const chunkConcepts = options.chunkConcepts || Object.create(null);
   const chunkPhraseMap = options.chunkPhraseMap || Object.create(null);
   const chunkTextRefs = options.chunkTextRefs || Object.create(null);
+  const conceptToSymbol = options.conceptToSymbol || Object.create(null);
   const artifactVersionByChunkId = new Map((options.artifacts || []).map((artifact) => [artifact.chunk_id, artifact]));
 
   for (const session of sessions) {
@@ -51,6 +52,8 @@ export function buildSymbolicStreams(sessions, chunks, options = {}, onProgress 
     const streamRecords = sessionChunks.map((chunk, index) => {
       const glyphProfile = chooseGlyphProfile(chunk);
       const linkedArtifact = artifactVersionByChunkId.get(chunk.chunk_id) || null;
+      const conceptIds = (chunkConcepts[chunk.chunk_id] || []).slice(0, 8).map((entry) => entry.concept_id);
+      const symbolIds = resolveSymbolIds(conceptIds, conceptToSymbol);
       return {
         seq: index + 1,
         chunk_id: chunk.chunk_id,
@@ -63,7 +66,8 @@ export function buildSymbolicStreams(sessions, chunks, options = {}, onProgress 
         turn_role: chunk.turn_role || null,
         summary_glyph: glyphProfile.glyph,
         glyph_probability: glyphProfile.probability,
-        concept_ids: (chunkConcepts[chunk.chunk_id] || []).slice(0, 8).map((entry) => entry.concept_id),
+        concept_ids: conceptIds,
+        symbol_ids: symbolIds,
         phrase_ids: (chunkPhraseMap[chunk.chunk_id] || []).slice(0, 12),
         textpack_ref: chunkTextRefs[chunk.chunk_id] || null,
         artifact_id: linkedArtifact?.artifact_id || null,
@@ -81,6 +85,21 @@ export function buildSymbolicStreams(sessions, chunks, options = {}, onProgress 
   }
 
   return files;
+}
+
+function resolveSymbolIds(conceptIds, conceptToSymbol) {
+  const seen = new Set();
+  const symbolIds = [];
+
+  for (const conceptId of conceptIds) {
+    const symbolId = conceptToSymbol[conceptId];
+    if (symbolId && !seen.has(symbolId)) {
+      seen.add(symbolId);
+      symbolIds.push(symbolId);
+    }
+  }
+
+  return symbolIds;
 }
 
 function chooseGlyphProfile(chunk) {

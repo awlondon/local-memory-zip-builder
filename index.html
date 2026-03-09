@@ -60,20 +60,27 @@
         </label>
 
         <label class="checkbox">
-          <input id="include-legacy-chunk-text" type="checkbox" checked>
-          Include legacy chunk text shards
+          <input id="include-legacy-chunk-text" type="checkbox">
+          Include legacy chunk text shards (redundant with textpack)
         </label>
 
         <label class="checkbox">
-          <input id="include-raw" type="checkbox" checked>
-          Include raw session/input shards
+          <input id="include-raw" type="checkbox">
+          Include raw session/input shards (redundant with textpack)
         </label>
       </div>
     </section>
 
     <section class="card actions">
       <button id="generate-btn" class="primary">Generate ZIP</button>
+      <button id="split-btn" class="secondary hidden">Split into smaller files</button>
       <a id="download-btn" class="secondary hidden" download>Download ZIP</a>
+    </section>
+
+    <section id="split-output" class="card hidden">
+      <h2>Split files</h2>
+      <p class="help">Download each part below, then process them one at a time through the builder above.</p>
+      <div id="split-links" class="split-links"></div>
     </section>
 
     <section class="card">
@@ -102,6 +109,6 @@
     </section>
   </main>
 
-  <script type="module" src="./src/app.js?v=20260307-11"></script>
+  <script type="module" src="./src/app.js?v=20260308-02"></script>
 </body>
 </html>

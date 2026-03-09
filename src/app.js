@@ -1,5 +1,5 @@
 ﻿import { createUIController } from "./ui.js";
-import { createZipBuilder } from "./zip.js";
+import { createZipBuilder, createStreamingZipBuilder } from "./zip.js";
 
 const STAGE_WEIGHTS = {
   reading: 0.12,
@@ -15,7 +15,7 @@ const STAGE_WEIGHTS = {
   archive_generation: 0.1
 };
 
-const WORKER_VERSION = "20260308-01";
+const WORKER_VERSION = "20260308-02";
 
 const STAGE_LABELS = {
   reading: "Reading input file...",
@@ -40,6 +40,7 @@ const state = {
   timerId: null,
   worker: null,
   zipBuilder: null,
+  useStreamingZip: false,
   stageProgress: Object.create(null),
   objectUrl: null,
   warnings: [],
@@ -50,6 +51,39 @@ ui.onGenerate(() => {
   startGeneration().catch((error) => {
     failGeneration(error);
   });
+});
+
+const splitObjectUrls = [];
+
+ui.onSplit(() => {
+  const file = ui.getSelectedFile();
+  if (!file) {
+    return;
+  }
+
+  for (const url of splitObjectUrls) {
+    URL.revokeObjectURL(url);
+  }
+  splitObjectUrls.length = 0;
+
+  const SPLIT_SIZE = 400 * 1024 * 1024;
+  const partCount = Math.ceil(file.size / SPLIT_SIZE);
+  const baseName = file.name.replace(/\.[^.]+$/, "");
+  const ext = file.name.includes(".") ? file.name.slice(file.name.lastIndexOf(".")) : "";
+  const links = [];
+
+  for (let i = 0; i < partCount; i++) {
+    const start = i * SPLIT_SIZE;
+    const end = Math.min(start + SPLIT_SIZE, file.size);
+    const blob = file.slice(start, end, file.type || "application/octet-stream");
+    const url = URL.createObjectURL(blob);
+    const filename = `${baseName}_part${i + 1}_of_${partCount}${ext}`;
+    splitObjectUrls.push(url);
+    links.push({ url, filename, size: end - start });
+  }
+
+  ui.showSplitLinks(links);
+  ui.setStatus(`File split into ${partCount} parts. Download each and process individually.`);
 });
 
 async function startGeneration() {
@@ -71,11 +105,13 @@ async function startGeneration() {
   await ensureJsZipLoaded();
   resetRunState();
 
+  const STREAMING_ZIP_THRESHOLD = 200 * 1024 * 1024;
   state.running = true;
   state.startedAt = performance.now();
   state.warnings = [];
   state.inputFile = file;
-  state.zipBuilder = createZipBuilder();
+  state.useStreamingZip = file.size > STREAMING_ZIP_THRESHOLD;
+  state.zipBuilder = state.useStreamingZip ? createStreamingZipBuilder() : createZipBuilder();
   ui.setBusy(true);
   ui.setProgress(0, STAGE_LABELS.reading);
   ui.setTiming(0, Number.NaN);
@@ -89,16 +125,24 @@ async function startGeneration() {
   const worker = new Worker(workerUrl, { type: "module" });
   state.worker = worker;
 
-  worker.addEventListener("message", async (event) => {
-    try {
-      await handleWorkerMessage(event.data);
-    } catch (error) {
-      failGeneration(error);
-    }
+  // Serialize async message handling — without this, overlapping awaits
+  // (e.g. file_batch addFile still in-flight when complete arrives) can
+  // cause finishGeneration() to null out zipBuilder mid-stream.
+  let messageQueue = Promise.resolve();
+  worker.addEventListener("message", (event) => {
+    messageQueue = messageQueue.then(async () => {
+      try {
+        await handleWorkerMessage(event.data);
+      } catch (error) {
+        failGeneration(error);
+      }
+    });
   });
 
   worker.addEventListener("error", (event) => {
-    failGeneration(event.error || new Error("Worker crashed."));
+    const detail = event.message || event.error?.message || "";
+    const loc = event.filename ? ` at ${event.filename}:${event.lineno}` : "";
+    failGeneration(event.error || new Error(`Worker crashed.${detail ? " " + detail : ""}${loc}`));
   });
 
   worker.postMessage({
@@ -137,11 +181,11 @@ async function handleWorkerMessage(message) {
 
   if (message.type === "file_batch") {
     if (!state.zipBuilder) {
-      state.zipBuilder = createZipBuilder();
+      state.zipBuilder = state.useStreamingZip ? createStreamingZipBuilder() : createZipBuilder();
     }
 
     for (const entry of message.files || []) {
-      state.zipBuilder.addFile(entry);
+      await state.zipBuilder.addFile(entry);
     }
     return;
   }
@@ -151,7 +195,7 @@ async function handleWorkerMessage(message) {
     ui.setProgress(computeOverallProgress() * 100, STAGE_LABELS.archive_generation);
 
     if (!state.zipBuilder) {
-      state.zipBuilder = createZipBuilder();
+      state.zipBuilder = state.useStreamingZip ? createStreamingZipBuilder() : createZipBuilder();
     }
 
     if (Array.isArray(message.rawFilePlan) && state.inputFile) {
@@ -164,7 +208,7 @@ async function handleWorkerMessage(message) {
         const end = Number.isFinite(plan.end) ? Math.max(start, plan.end) : state.inputFile.size;
         const shardBlob = state.inputFile.slice(start, end);
 
-        state.zipBuilder.addFile({
+        await state.zipBuilder.addFile({
           path: plan.path,
           content: shardBlob,
           options: {

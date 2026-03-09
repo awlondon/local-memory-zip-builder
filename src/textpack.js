@@ -258,9 +258,14 @@ function promoteArtifacts(chunks, chunkConcepts, onProgress) {
 }
 
 function buildLexicon(chunks) {
+  const MAX_LEXICON_SAMPLE = 8_000;
+  const sample = chunks.length <= MAX_LEXICON_SAMPLE
+    ? chunks
+    : evenlySpacedSample(chunks, MAX_LEXICON_SAMPLE);
+
   const counts = new Map();
 
-  for (const chunk of chunks) {
+  for (const chunk of sample) {
     const tokens = tokenize(chunk.text);
     const seen = new Set();
     for (let size = 3; size <= 6; size += 1) {
@@ -472,6 +477,15 @@ function estimateDirectCost(record) {
   const phraseCost = (record.phrase_ids || []).length * 6;
   const templateCost = Number.isFinite(record.template_id) ? 4 : 0;
   return literalCost + phraseCost + templateCost + 8;
+}
+
+function evenlySpacedSample(array, count) {
+  const result = [];
+  const step = array.length / count;
+  for (let i = 0; i < count; i += 1) {
+    result.push(array[Math.floor(i * step)]);
+  }
+  return result;
 }
 
 function makeTextRef(record, shard) {

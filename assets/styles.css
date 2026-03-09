@@ -205,6 +205,30 @@ progress {
   color: var(--warn);
 }
 
+.split-links {
+  display: grid;
+  gap: 0.5rem;
+}
+
+.split-links a {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.45rem 0.85rem;
+  background: #ddebe5;
+  color: #103529;
+  border: 1px solid #b8d3c8;
+  border-radius: 8px;
+  text-decoration: none;
+  font-weight: 600;
+  font-size: 0.93rem;
+  transition: background 120ms ease;
+}
+
+.split-links a:hover {
+  background: #cde3da;
+}
+
 .hidden {
   display: none;
 }

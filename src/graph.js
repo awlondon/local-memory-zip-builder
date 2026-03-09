@@ -30,8 +30,11 @@ export function buildGraphArtifacts(payload, onProgress = () => {}) {
     });
   }
 
+  // Cap concept links per chunk to top 6 to control edge volume at scale.
+  const MAX_CONCEPT_LINKS_PER_CHUNK = 6;
+
   for (const chunk of chunks) {
-    const links = chunkConcepts[chunk.chunk_id] || [];
+    const links = (chunkConcepts[chunk.chunk_id] || []).slice(0, MAX_CONCEPT_LINKS_PER_CHUNK);
     for (let i = 0; i < links.length; i += 1) {
       const link = links[i];
       const relationType = i === 0 ? "primary_topic_of" : "mentioned_in";
@@ -58,7 +61,7 @@ export function buildGraphArtifacts(payload, onProgress = () => {}) {
         tokenizeForSimilarity(previousChunk.text),
         tokenizeForSimilarity(currentChunk.text)
       );
-      if (similarity >= 0.14) {
+      if (similarity >= 0.25) {
         addEdge(previousId, currentId, "follows_from", 0.35 + similarity);
       }
 
@@ -114,37 +117,38 @@ export function buildGraphArtifacts(payload, onProgress = () => {}) {
   }
   onProgress(0.72);
 
-  const conceptPairs = [];
-  for (let i = 0; i < concepts.length; i += 1) {
-    for (let j = i + 1; j < concepts.length; j += 1) {
-      conceptPairs.push([concepts[i], concepts[j]]);
-    }
-  }
+  const MAX_CONCEPT_PAIRS = 2000;
+  const pairedConcepts = concepts.length <= MAX_CONCEPT_PAIRS ? concepts : concepts.slice(0, MAX_CONCEPT_PAIRS);
+  const totalPairs = pairedConcepts.length * (pairedConcepts.length - 1) / 2;
+  let pairIndex = 0;
 
-  for (let i = 0; i < conceptPairs.length; i += 1) {
-    const [conceptA, conceptB] = conceptPairs[i];
-    const overlapCount = countOverlap(conceptA.chunk_ids, conceptB.chunk_ids);
+  for (let i = 0; i < pairedConcepts.length; i += 1) {
+    const conceptA = pairedConcepts[i];
+    for (let j = i + 1; j < pairedConcepts.length; j += 1) {
+      const conceptB = pairedConcepts[j];
 
-    if (overlapCount >= 2) {
-      addEdge(conceptA.concept_id, conceptB.concept_id, "often_cooccurs_with", 0.35 + overlapCount * 0.08);
-    }
+      const overlapCount = countOverlap(conceptA.chunk_ids, conceptB.chunk_ids);
+      if (overlapCount >= 3) {
+        addEdge(conceptA.concept_id, conceptB.concept_id, "often_cooccurs_with", 0.35 + overlapCount * 0.08);
+      }
 
-    const labelSetA = tokenizeForSimilarity(conceptA.label);
-    const labelSetB = tokenizeForSimilarity(conceptB.label);
-    const labelSimilarity = jaccardFromSets(labelSetA, labelSetB);
+      const labelSetA = tokenizeForSimilarity(conceptA.label);
+      const labelSetB = tokenizeForSimilarity(conceptB.label);
+      const labelSimilarity = jaccardFromSets(labelSetA, labelSetB);
+      if (labelSimilarity >= 0.45) {
+        addEdge(conceptA.concept_id, conceptB.concept_id, "related_to", 0.3 + labelSimilarity);
+      }
 
-    if (labelSimilarity >= 0.45) {
-      addEdge(conceptA.concept_id, conceptB.concept_id, "related_to", 0.3 + labelSimilarity);
-    }
+      if (conceptA.label.length > conceptB.label.length && conceptA.label.toLowerCase().includes(conceptB.label.toLowerCase())) {
+        addEdge(conceptA.concept_id, conceptB.concept_id, "subconcept_of", 0.65);
+      } else if (conceptB.label.length > conceptA.label.length && conceptB.label.toLowerCase().includes(conceptA.label.toLowerCase())) {
+        addEdge(conceptB.concept_id, conceptA.concept_id, "subconcept_of", 0.65);
+      }
 
-    if (conceptA.label.length > conceptB.label.length && conceptA.label.toLowerCase().includes(conceptB.label.toLowerCase())) {
-      addEdge(conceptA.concept_id, conceptB.concept_id, "subconcept_of", 0.65);
-    } else if (conceptB.label.length > conceptA.label.length && conceptB.label.toLowerCase().includes(conceptA.label.toLowerCase())) {
-      addEdge(conceptB.concept_id, conceptA.concept_id, "subconcept_of", 0.65);
-    }
-
-    if ((i + 1) % 400 === 0 || i === conceptPairs.length - 1) {
-      onProgress(0.72 + 0.28 * ((i + 1) / Math.max(1, conceptPairs.length)));
+      pairIndex += 1;
+      if (pairIndex % 400 === 0 || pairIndex === totalPairs) {
+        onProgress(0.72 + 0.28 * (pairIndex / Math.max(1, totalPairs)));
+      }
     }
   }
 
@@ -158,23 +162,39 @@ export function buildGraphArtifacts(payload, onProgress = () => {}) {
     return a.dst.localeCompare(b.dst);
   });
 
-  const conceptStats = concepts.map((concept) => {
-    const conceptEdges = edges.filter((edge) => edge.src === concept.concept_id || edge.dst === concept.concept_id);
-    const chunkEdges = conceptEdges.filter((edge) => edge.dst.startsWith("chunk_"));
-    const conceptEdgesOnly = conceptEdges.filter(
-      (edge) => edge.src.startsWith("concept_") && edge.dst.startsWith("concept_")
-    );
-    const artifactEdges = conceptEdges.filter((edge) => edge.dst.startsWith("artifact_version_"));
+  const degreeMaps = {
+    total: new Map(),
+    chunk: new Map(),
+    concept: new Map(),
+    artifact: new Map()
+  };
 
-    return {
-      concept_id: concept.concept_id,
-      label: concept.label,
-      degree_total: conceptEdges.length,
-      chunk_degree: chunkEdges.length,
-      concept_degree: conceptEdgesOnly.length,
-      artifact_degree: artifactEdges.length
-    };
-  });
+  for (const edge of edges) {
+    for (const nodeId of [edge.src, edge.dst]) {
+      if (nodeId.startsWith("concept_")) {
+        degreeMaps.total.set(nodeId, (degreeMaps.total.get(nodeId) || 0) + 1);
+      }
+    }
+    if (edge.src.startsWith("concept_") && edge.dst.startsWith("chunk_")) {
+      degreeMaps.chunk.set(edge.src, (degreeMaps.chunk.get(edge.src) || 0) + 1);
+    }
+    if (edge.src.startsWith("concept_") && edge.dst.startsWith("concept_")) {
+      degreeMaps.concept.set(edge.src, (degreeMaps.concept.get(edge.src) || 0) + 1);
+      degreeMaps.concept.set(edge.dst, (degreeMaps.concept.get(edge.dst) || 0) + 1);
+    }
+    if (edge.src.startsWith("concept_") && edge.dst.startsWith("artifact_version_")) {
+      degreeMaps.artifact.set(edge.src, (degreeMaps.artifact.get(edge.src) || 0) + 1);
+    }
+  }
+
+  const conceptStats = concepts.map((concept) => ({
+    concept_id: concept.concept_id,
+    label: concept.label,
+    degree_total: degreeMaps.total.get(concept.concept_id) || 0,
+    chunk_degree: degreeMaps.chunk.get(concept.concept_id) || 0,
+    concept_degree: degreeMaps.concept.get(concept.concept_id) || 0,
+    artifact_degree: degreeMaps.artifact.get(concept.concept_id) || 0
+  }));
 
   return { edges, conceptStats };
 }

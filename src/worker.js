@@ -1,12 +1,18 @@
-﻿import { parseTextToBlocks } from "./parser.js";
+import { parseTextToBlocks } from "./parser.js";
 import { sessionizeBlocks } from "./sessionizer.js";
 import { chunkSessions } from "./chunker.js";
 import { extractConcepts } from "./concepts.js";
 import { buildGraphArtifacts } from "./graph.js";
 import { buildSymbolicStreams } from "./symbolic.js";
 import { buildTextpackBundle } from "./textpack.js";
+<<<<<<< HEAD
 import { buildCoreObsessionsArtifact } from "./core-obsessions-artifact.js";
 import { detectInputFormat, normalizeInputForRetrieval, rawInputShardPath } from "./ingest.js?v=20260308-01";
+=======
+import { buildSymbolLibrary } from "./symbol-library.js";
+import { buildQueryProtocol } from "./query.js";
+import { detectInputFormat, normalizeInputForRetrieval, rawInputShardPath } from "./ingest.js?v=20260308-02";
+>>>>>>> b58e50ffe910b305203987058cf11e084ae8a96e
 import {
   buildChunkManifest,
   buildConceptIndex,
@@ -14,8 +20,7 @@ import {
   buildGenerationReport,
   buildInstructionsFile,
   buildSessionIndex,
-  buildSessionManifest,
-  buildTextpackManifest
+  buildSessionManifest
 } from "./schemas.js";
 import {
   asJsonl,
@@ -26,25 +31,13 @@ import {
   toKeywordMap
 } from "./utils.js";
 
-const NORMAL_PART_BYTES = {
+const PART_BYTES = {
   text: 32 * 1024 * 1024,
   html: 20 * 1024 * 1024,
   json: 12 * 1024 * 1024
 };
 
-const LOW_MEMORY_PART_BYTES = {
-  text: 8 * 1024 * 1024,
-  html: 4 * 1024 * 1024,
-  json: 4 * 1024 * 1024
-};
-
-const LOW_MEMORY_THRESHOLD_BYTES = 220 * 1024 * 1024;
 const RAW_SHARD_COMPRESS_STORE_BYTES = 25 * 1024 * 1024;
-const MAX_EDGES_TOTAL = 150000;
-const MAX_RAW_INPUT_PARTS_IN_ZIP_BYTES = 280 * 1024 * 1024;
-const LOW_MEMORY_MAX_SESSION_RECORDS = 90000;
-const LOW_MEMORY_MAX_CHUNK_RECORDS = 180000;
-const LOW_MEMORY_MAX_CONCEPT_STATS = 180000;
 const CHUNK_PREVIEW_MAX = 260;
 const FILE_BATCH_MAX_ITEMS = 24;
 const FILE_BATCH_MAX_BYTES = 2 * 1024 * 1024;
@@ -76,7 +69,6 @@ async function runPipeline({ file, settings }) {
   const warnings = [];
   const limits = {
     browser_memory_bound: true,
-    max_tested_text_size_mb: 120,
     processing_mode: "single"
   };
 
@@ -91,25 +83,11 @@ async function runPipeline({ file, settings }) {
     self.postMessage({ type: "warning", warning });
   };
 
-  const lowMemoryMode = bytes >= LOW_MEMORY_THRESHOLD_BYTES;
-  const partByteSize = lowMemoryMode
-    ? (LOW_MEMORY_PART_BYTES[inputFormat] || LOW_MEMORY_PART_BYTES.text)
-    : (NORMAL_PART_BYTES[inputFormat] || NORMAL_PART_BYTES.text);
-
+  const partByteSize = PART_BYTES[inputFormat] || PART_BYTES.text;
   const partPlan = buildPartPlan(bytes, partByteSize);
   limits.processing_part_size_mb = roundMb(partByteSize);
   limits.processing_part_count = partPlan.length;
   limits.processing_mode = partPlan.length > 1 ? "sequential_parts" : "single";
-  limits.low_memory_mode = lowMemoryMode;
-
-  if (lowMemoryMode) {
-    pushWarning(
-      `Low-memory mode enabled for ${(bytes / (1024 * 1024)).toFixed(0)} MB input. Using ${(partByteSize / (1024 * 1024)).toFixed(0)} MB parts and reduced in-memory payloads.`
-    );
-    pushWarning(
-      "Textpack, symbolic streams, and graph artifacts are emitted per source part in low-memory mode. Cross-part deduplication and artifact version linking are reduced to keep memory bounded."
-    );
-  }
 
   if (partPlan.length > 1) {
     pushWarning(
@@ -117,25 +95,26 @@ async function runPipeline({ file, settings }) {
     );
   }
 
-  const includeRaw = settings.includeRaw !== false;
-  const includeLegacyChunkText = settings.includeLegacyChunkText !== false;
+  const LARGE_INPUT_BYTES = 800 * 1024 * 1024;
+  const isLargeInput = bytes > LARGE_INPUT_BYTES;
+
+  let includeRaw = settings.includeRaw === true;
+  let includeLegacyChunkText = settings.includeLegacyChunkText === true;
   const includeSymbolic = settings.includeSymbolic !== false;
   const includeTextpack = true;
-  const includeSessionRawShards = includeRaw && !lowMemoryMode;
-  const includeRawInputParts = includeRaw && (!lowMemoryMode || bytes <= MAX_RAW_INPUT_PARTS_IN_ZIP_BYTES);
+
+  if (isLargeInput && includeRaw) {
+    includeRaw = false;
+    pushWarning("Raw input file inclusion disabled for very large inputs (>800 MB) to stay within browser memory limits. Textpack preserves all text for reconstruction.");
+  }
+
+  if (isLargeInput && includeLegacyChunkText) {
+    includeLegacyChunkText = false;
+    pushWarning("Legacy chunk text shards disabled for very large inputs (>800 MB). Textpack encoding provides equivalent reversible text storage.");
+  }
 
   if (settings.includeTextpack === false) {
     pushWarning("Textpack output is required for reversible reconstruction in this build and will remain enabled.");
-  }
-
-  if (includeRaw && !includeSessionRawShards) {
-    pushWarning("Session raw shard files are skipped in low-memory mode to prevent browser crashes.");
-  }
-
-  if (includeRaw && !includeRawInputParts) {
-    pushWarning(
-      `Original input parts are omitted from ZIP above ${(MAX_RAW_INPUT_PARTS_IN_ZIP_BYTES / (1024 * 1024)).toFixed(0)} MB to prevent browser OOM.`
-    );
   }
 
   if (includeLegacyChunkText) {
@@ -171,13 +150,16 @@ async function runPipeline({ file, settings }) {
   const allConcepts = [];
   const allChunkConcepts = Object.create(null);
   const allEdges = [];
-  const allConceptStats = [];
   const chunkTextShardPaths = [];
   const textpackShardPaths = [];
   const textpackShardEntries = [];
-  const allArtifacts = [];
-  const textpackValidationSummaries = [];
-  const textpackStatsSummaries = [];
+
+  const textpackChunkTextRefs = Object.create(null);
+  const textpackChunkPhraseMap = Object.create(null);
+  const textpackArtifacts = [];
+  const textpackValidations = [];
+  const textpackStats = { raw_text_bytes: 0, textpack_literal_bytes: 0, lexicon_entries: 0, template_entries: 0, artifact_versions: 0 };
+  let lastTextpackManifestPath = null;
 
   const counters = {
     session: 1,
@@ -188,14 +170,9 @@ async function runPipeline({ file, settings }) {
   let previousLastSessionId = null;
   let previousLastChunkId = null;
   let globalOffsetBase = 0;
-  let edgeCapReached = false;
-  let sessionCapWarned = false;
-  let chunkCapWarned = false;
-  let conceptStatsCapWarned = false;
   let totalSessionsProcessed = 0;
   let totalChunksProcessed = 0;
   let totalConceptsProcessed = 0;
-  let totalArtifactVersionsProcessed = 0;
 
   for (let i = 0; i < partPlan.length; i += 1) {
     const part = partPlan[i];
@@ -266,14 +243,10 @@ async function runPipeline({ file, settings }) {
     totalConceptsProcessed += remapped.concepts.length;
 
     if (previousLastChunkId && remapped.chunks.length) {
-      safePushEdge(allEdges, { src: previousLastChunkId, dst: remapped.chunks[0].chunk_id, type: "adjacent_to", weight: 1 }, pushWarning, () => {
-        edgeCapReached = true;
-      });
+      allEdges.push({ src: previousLastChunkId, dst: remapped.chunks[0].chunk_id, type: "adjacent_to", weight: 1 });
     }
     if (previousLastSessionId && remapped.sessions.length) {
-      safePushEdge(allEdges, { src: previousLastSessionId, dst: remapped.sessions[0].session_id, type: "continues", weight: 0.55 }, pushWarning, () => {
-        edgeCapReached = true;
-      });
+      allEdges.push({ src: previousLastSessionId, dst: remapped.sessions[0].session_id, type: "continues", weight: 0.55 });
     }
 
     if (remapped.sessions.length) {
@@ -283,7 +256,7 @@ async function runPipeline({ file, settings }) {
       previousLastChunkId = remapped.chunks[remapped.chunks.length - 1].chunk_id;
     }
 
-    if (includeSessionRawShards) {
+    if (includeRaw) {
       for (const session of remapped.sessions) {
         enqueueFile({
           path: `local_memory/raw/${session.session_id}.txt`,
@@ -320,77 +293,6 @@ async function runPipeline({ file, settings }) {
       chunkTextShardPaths.push(chunkTextShardPath);
     }
 
-    let partTextpackBundle = null;
-    if (includeTextpack && lowMemoryMode) {
-      emitProgress(
-        "artifact_promotion",
-        aggregatePartProgress(i, partPlan.length, 0),
-        `Promoting structured artifacts for ${partLabel}...`
-      );
-      emitProgress(
-        "textpack_build",
-        aggregatePartProgress(i, partPlan.length, 0),
-        `Encoding textpack payloads for ${partLabel}...`
-      );
-
-      partTextpackBundle = buildTextpackBundle(remapped.chunks, remapped.chunkConcepts, {
-        bundleId: i + 1,
-        forceShardScopedAuxPaths: true,
-        enableDeltaEncoding: settings.enableDeltaEncoding !== false,
-        onArtifactProgress: (fraction) => emitProgress(
-          "artifact_promotion",
-          aggregatePartProgress(i, partPlan.length, fraction),
-          `Promoting structured artifacts for ${partLabel}...`
-        ),
-        onEncodingProgress: (fraction) => emitProgress(
-          "textpack_build",
-          aggregatePartProgress(i, partPlan.length, fraction),
-          `Encoding textpack payloads for ${partLabel}...`
-        )
-      });
-
-      emitProgress(
-        "artifact_promotion",
-        aggregatePartProgress(i, partPlan.length, 1),
-        `Structured artifacts promoted for ${partLabel}.`
-      );
-      emitProgress(
-        "textpack_build",
-        aggregatePartProgress(i, partPlan.length, 1),
-        `Textpack payloads encoded for ${partLabel}.`
-      );
-      emitProgress(
-        "textpack_validate",
-        aggregatePartProgress(i, partPlan.length, 1),
-        `Textpack reconstruction validated for ${partLabel}.`
-      );
-
-      textpackShardPaths.push(...partTextpackBundle.shardPaths);
-      textpackShardEntries.push(...partTextpackBundle.manifest.shards.map((shard) => ({
-        ...shard,
-        lexicon_path: partTextpackBundle.manifest.dictionary.lexicon_path,
-        templates_path: partTextpackBundle.manifest.dictionary.templates_path,
-        manifest_path: partTextpackBundle.manifestPath
-      })));
-      textpackValidationSummaries.push(partTextpackBundle.validation);
-      textpackStatsSummaries.push(partTextpackBundle.stats);
-      totalArtifactVersionsProcessed += partTextpackBundle.artifacts.length;
-
-      if (partTextpackBundle.validation?.failures?.length) {
-        pushWarning(
-          `Textpack validation reported ${partTextpackBundle.validation.failures.length} failure(s) in ${partLabel}.`
-        );
-      }
-
-      for (const artifact of partTextpackBundle.artifacts) {
-        allArtifacts.push(artifact);
-      }
-
-      for (const fileEntry of partTextpackBundle.files) {
-        enqueueFile(fileEntry);
-      }
-    }
-
     for (const session of remapped.sessions) {
       const lightweightSession = {
         session_id: session.session_id,
@@ -414,20 +316,66 @@ async function runPipeline({ file, settings }) {
         ai_turn_ratio: session.ai_turn_ratio || 0
       };
 
-      if (!lowMemoryMode || allSessions.length < LOW_MEMORY_MAX_SESSION_RECORDS) {
-        allSessions.push(lightweightSession);
-      } else if (!sessionCapWarned) {
-        pushWarning(`Session manifest cap reached at ${LOW_MEMORY_MAX_SESSION_RECORDS} records in low-memory mode.`);
-        sessionCapWarned = true;
-      }
+      allSessions.push(lightweightSession);
     }
 
-    for (const chunk of remapped.chunks) {
-      if (!lowMemoryMode) {
-        allFullChunks.push(chunk);
+    // ── Per-part textpack encoding (before accumulating chunks) ──
+    if (includeTextpack) {
+      const partBundleId = i + 1;
+      const multiPart = partPlan.length > 1;
+      const partChunkConcepts = Object.create(null);
+      for (const chunk of remapped.chunks) {
+        if (remapped.chunkConcepts[chunk.chunk_id]) {
+          partChunkConcepts[chunk.chunk_id] = remapped.chunkConcepts[chunk.chunk_id];
+        }
       }
 
-      const manifestChunk = {
+      const bundle = buildTextpackBundle(remapped.chunks, partChunkConcepts, {
+        bundleId: partBundleId,
+        enableDeltaEncoding: settings.enableDeltaEncoding !== false,
+        forceShardScopedAuxPaths: multiPart,
+        onArtifactProgress: (fraction) => {
+          emitProgress("artifact_promotion", aggregatePartProgress(i, partPlan.length, fraction), "Promoting structured artifacts...");
+        },
+        onEncodingProgress: (fraction) => {
+          emitProgress("textpack_build", aggregatePartProgress(i, partPlan.length, fraction), `Encoding textpack part ${partLabel}...`);
+        }
+      });
+
+      for (const fileEntry of bundle.files) {
+        enqueueFile(fileEntry);
+      }
+      flushPendingFiles();
+
+      textpackShardPaths.push(...bundle.shardPaths);
+      textpackShardEntries.push(...bundle.manifest.shards.map((shard) => ({
+        ...shard,
+        lexicon_path: bundle.manifest.dictionary.lexicon_path,
+        templates_path: bundle.manifest.dictionary.templates_path,
+        manifest_path: bundle.manifestPath
+      })));
+      Object.assign(textpackChunkTextRefs, bundle.chunkTextRefs);
+      Object.assign(textpackChunkPhraseMap, bundle.chunkPhraseMap);
+      textpackArtifacts.push(...bundle.artifacts);
+      textpackValidations.push(bundle.validation);
+      textpackStats.raw_text_bytes += bundle.stats.raw_text_bytes;
+      textpackStats.textpack_literal_bytes += bundle.stats.textpack_literal_bytes;
+      textpackStats.lexicon_entries += bundle.stats.lexicon_entries;
+      textpackStats.template_entries += bundle.stats.template_entries;
+      textpackStats.artifact_versions += bundle.stats.artifact_versions;
+      lastTextpackManifestPath = bundle.manifestPath;
+    }
+
+    // ── Trim chunk text after textpack captures it, then accumulate ──
+    const TEXT_TRIM_LIMIT = 1200;
+    for (const chunk of remapped.chunks) {
+      if (chunk.text.length > TEXT_TRIM_LIMIT) {
+        chunk.text = chunk.text.slice(0, TEXT_TRIM_LIMIT);
+      }
+
+      allFullChunks.push(chunk);
+
+      manifestChunks.push({
         chunk_id: chunk.chunk_id,
         session_id: chunk.session_id,
         seq_in_session: chunk.seq_in_session,
@@ -445,15 +393,8 @@ async function runPipeline({ file, settings }) {
         turn_role: chunk.turn_role || null,
         turn_count: chunk.turn_count || 1,
         speaker_sequence_preview: chunk.speaker_sequence_preview || "",
-        text_ref: partTextpackBundle?.chunkTextRefs[chunk.chunk_id] || null
-      };
-
-      if (!lowMemoryMode || manifestChunks.length < LOW_MEMORY_MAX_CHUNK_RECORDS) {
-        manifestChunks.push(manifestChunk);
-      } else if (!chunkCapWarned) {
-        pushWarning(`Chunk manifest cap reached at ${LOW_MEMORY_MAX_CHUNK_RECORDS} records in low-memory mode.`);
-        chunkCapWarned = true;
-      }
+        text_ref: null
+      });
     }
 
     for (const concept of remapped.concepts) {
@@ -464,80 +405,6 @@ async function runPipeline({ file, settings }) {
       allChunkConcepts[chunkId] = links;
     }
 
-    if (lowMemoryMode) {
-      emitProgress(
-        "graph_build",
-        aggregatePartProgress(i, partPlan.length, 0),
-        `Building graph artifacts for ${partLabel}...`
-      );
-      const partGraph = buildGraphArtifacts(
-        {
-          sessions: remapped.sessions,
-          chunks: remapped.chunks,
-          concepts: remapped.concepts,
-          chunkConcepts: remapped.chunkConcepts,
-          artifacts: partTextpackBundle?.artifacts || []
-        },
-        (fraction) => emitProgress(
-          "graph_build",
-          aggregatePartProgress(i, partPlan.length, fraction),
-          `Building graph artifacts for ${partLabel}...`
-        )
-      );
-
-      if (!edgeCapReached) {
-        for (const edge of partGraph.edges) {
-          if (!safePushEdge(allEdges, edge, pushWarning, () => {
-            edgeCapReached = true;
-          })) {
-            break;
-          }
-        }
-      }
-
-      for (const stat of partGraph.conceptStats) {
-        if (!lowMemoryMode || allConceptStats.length < LOW_MEMORY_MAX_CONCEPT_STATS) {
-          allConceptStats.push(stat);
-        } else if (!conceptStatsCapWarned) {
-          pushWarning(`Concept stat cap reached at ${LOW_MEMORY_MAX_CONCEPT_STATS} records in low-memory mode.`);
-          conceptStatsCapWarned = true;
-        }
-      }
-
-      if (includeSymbolic) {
-        emitProgress(
-          "symbolic_streams",
-          aggregatePartProgress(i, partPlan.length, 0),
-          `Generating symbolic streams for ${partLabel}...`
-        );
-        const symbolicFiles = buildSymbolicStreams(
-          remapped.sessions,
-          remapped.chunks,
-          {
-            chunkConcepts: remapped.chunkConcepts,
-            chunkPhraseMap: partTextpackBundle?.chunkPhraseMap || Object.create(null),
-            chunkTextRefs: partTextpackBundle?.chunkTextRefs || Object.create(null),
-            artifacts: partTextpackBundle?.artifacts || []
-          },
-          (fraction) => emitProgress(
-            "symbolic_streams",
-            aggregatePartProgress(i, partPlan.length, fraction),
-            `Generating symbolic streams for ${partLabel}...`
-          )
-        );
-
-        for (const fileEntry of symbolicFiles) {
-          enqueueFile(fileEntry);
-        }
-      }
-
-      emitProgress(
-        "symbolic_streams",
-        aggregatePartProgress(i, partPlan.length, 1),
-        includeSymbolic ? `Symbolic streams complete for ${partLabel}.` : "Symbolic streams disabled."
-      );
-    }
-
     await pause();
   }
 
@@ -545,109 +412,71 @@ async function runPipeline({ file, settings }) {
     throw new Error("No retrievable text found after parsing input.");
   }
 
-  let textpackBundle = null;
-  let artifactVersions = allArtifacts;
+  emitProgress("artifact_promotion", 1, "Structured artifacts promoted.");
+  emitProgress("textpack_build", 1, includeTextpack ? "Textpack payloads encoded." : "Textpack disabled.");
+  emitProgress("textpack_validate", 1, includeTextpack ? "Textpack reconstruction validated." : "Textpack validation skipped.");
 
-  if (!lowMemoryMode) {
-    emitProgress("artifact_promotion", 0, "Promoting structured artifacts...");
-    emitProgress("textpack_build", 0, "Encoding textpack payloads...");
-    textpackBundle = includeTextpack
-      ? buildTextpackBundle(allFullChunks, allChunkConcepts, {
-        bundleId: 1,
-        enableDeltaEncoding: settings.enableDeltaEncoding !== false,
-        onArtifactProgress: (fraction) => emitProgress("artifact_promotion", fraction, "Promoting structured artifacts..."),
-        onEncodingProgress: (fraction) => emitProgress("textpack_build", fraction, "Encoding textpack payloads...")
-      })
-      : null;
-    emitProgress("artifact_promotion", 1, "Structured artifacts promoted.");
-    emitProgress("textpack_build", 1, includeTextpack ? "Textpack payloads encoded." : "Textpack disabled.");
-    emitProgress("textpack_validate", 1, includeTextpack ? "Textpack reconstruction validated." : "Textpack validation skipped.");
+  const textpackValidationSummaries = textpackValidations.length ? textpackValidations : [];
+  const textpackStatsSummaries = textpackStats.raw_text_bytes > 0 ? [textpackStats] : [];
+  let totalArtifactVersionsProcessed = textpackArtifacts.length;
+  let artifactVersions = textpackArtifacts;
 
-    if (textpackBundle) {
-      textpackShardPaths.push(...textpackBundle.shardPaths);
-      textpackShardEntries.push(...textpackBundle.manifest.shards.map((shard) => ({
-        ...shard,
-        lexicon_path: textpackBundle.manifest.dictionary.lexicon_path,
-        templates_path: textpackBundle.manifest.dictionary.templates_path,
-        manifest_path: textpackBundle.manifestPath
-      })));
-      textpackValidationSummaries.push(textpackBundle.validation);
-      textpackStatsSummaries.push(textpackBundle.stats);
-      totalArtifactVersionsProcessed = textpackBundle.artifacts.length;
-      artifactVersions = textpackBundle.artifacts;
-    }
-
-    for (const manifestChunk of manifestChunks) {
-      if (textpackBundle?.chunkTextRefs[manifestChunk.chunk_id]) {
-        manifestChunk.text_ref = textpackBundle.chunkTextRefs[manifestChunk.chunk_id];
-      } else if (includeLegacyChunkText) {
-        manifestChunk.text_ref = { mode: "legacy_chunk_text", shard: "local_memory/chunks", record: manifestChunk.chunk_id };
-      }
-    }
-
-    emitProgress("graph_build", 0, "Building graph artifacts...");
-    const globalGraph = buildGraphArtifacts(
-      {
-        sessions: allSessions,
-        chunks: allFullChunks,
-        concepts: allConcepts,
-        chunkConcepts: allChunkConcepts,
-        artifacts: textpackBundle?.artifacts || []
-      },
-      (fraction) => emitProgress("graph_build", fraction, "Building graph artifacts...")
-    );
-
-    if (!edgeCapReached) {
-      for (const edge of globalGraph.edges) {
-        if (!safePushEdge(allEdges, edge, pushWarning, () => {
-          edgeCapReached = true;
-        })) {
-          break;
-        }
-      }
-    }
-
-    for (const stat of globalGraph.conceptStats) {
-      if (!lowMemoryMode || allConceptStats.length < LOW_MEMORY_MAX_CONCEPT_STATS) {
-        allConceptStats.push(stat);
-      } else if (!conceptStatsCapWarned) {
-        pushWarning(`Concept stat cap reached at ${LOW_MEMORY_MAX_CONCEPT_STATS} records in low-memory mode.`);
-        conceptStatsCapWarned = true;
-      }
-    }
-
-    emitProgress("symbolic_streams", 0, "Generating symbolic streams...");
-    if (includeSymbolic) {
-      const symbolicFiles = buildSymbolicStreams(
-        allSessions,
-        allFullChunks,
-        {
-          chunkConcepts: allChunkConcepts,
-          chunkPhraseMap: textpackBundle?.chunkPhraseMap || Object.create(null),
-          chunkTextRefs: textpackBundle?.chunkTextRefs || Object.create(null),
-          artifacts: textpackBundle?.artifacts || []
-        },
-        (fraction) => emitProgress("symbolic_streams", fraction, "Generating symbolic streams...")
-      );
-
-      for (const fileEntry of symbolicFiles) {
-        enqueueFile(fileEntry);
-      }
-    }
-    emitProgress("symbolic_streams", 1, includeSymbolic ? "Symbolic streams complete." : "Symbolic streams disabled.");
-  } else {
-    emitProgress("artifact_promotion", 1, includeTextpack ? "Structured artifacts promoted per source part." : "Artifact promotion skipped.");
-    emitProgress("textpack_build", 1, includeTextpack ? "Textpack payloads encoded per source part." : "Textpack disabled.");
-    emitProgress("textpack_validate", 1, includeTextpack ? "Textpack reconstruction validated per source part." : "Textpack validation skipped.");
-    emitProgress("graph_build", 1, "Graph artifacts built per source part.");
-    emitProgress("symbolic_streams", 1, includeSymbolic ? "Symbolic streams generated per source part." : "Symbolic streams disabled.");
-
-    for (const manifestChunk of manifestChunks) {
-      if (!manifestChunk.text_ref && includeLegacyChunkText) {
-        manifestChunk.text_ref = { mode: "legacy_chunk_text", shard: "local_memory/chunks", record: manifestChunk.chunk_id };
-      }
+  for (const manifestChunk of manifestChunks) {
+    if (textpackChunkTextRefs[manifestChunk.chunk_id]) {
+      manifestChunk.text_ref = textpackChunkTextRefs[manifestChunk.chunk_id];
+    } else if (includeLegacyChunkText) {
+      manifestChunk.text_ref = { mode: "legacy_chunk_text", shard: "local_memory/chunks", record: manifestChunk.chunk_id };
     }
   }
+
+  emitProgress("graph_build", 0, "Building graph artifacts...");
+  const globalGraph = buildGraphArtifacts(
+    {
+      sessions: allSessions,
+      chunks: allFullChunks,
+      concepts: allConcepts,
+      chunkConcepts: allChunkConcepts,
+      artifacts: textpackArtifacts
+    },
+    (fraction) => emitProgress("graph_build", fraction, "Building graph artifacts...")
+  );
+
+  for (const edge of globalGraph.edges) {
+    allEdges.push(edge);
+  }
+
+  const symbolLibrary = buildSymbolLibrary(allConcepts, allChunkConcepts, allEdges);
+
+  emitProgress("symbolic_streams", 0, "Generating symbolic streams...");
+  if (includeSymbolic) {
+    const symbolicFiles = buildSymbolicStreams(
+      allSessions,
+      allFullChunks,
+      {
+        chunkConcepts: allChunkConcepts,
+        chunkPhraseMap: textpackChunkPhraseMap,
+        chunkTextRefs: textpackChunkTextRefs,
+        artifacts: textpackArtifacts,
+        conceptToSymbol: symbolLibrary.conceptToSymbol
+      },
+      (fraction) => emitProgress("symbolic_streams", fraction, "Generating symbolic streams...")
+    );
+
+    for (const fileEntry of symbolicFiles) {
+      enqueueFile(fileEntry);
+    }
+  }
+  emitProgress("symbolic_streams", 1, includeSymbolic ? "Symbolic streams complete." : "Symbolic streams disabled.");
+
+  // ── Release large data structures no longer needed ──
+  allFullChunks.length = 0;
+  for (const key of Object.keys(textpackChunkPhraseMap)) {
+    delete textpackChunkPhraseMap[key];
+  }
+  for (const key of Object.keys(textpackChunkTextRefs)) {
+    delete textpackChunkTextRefs[key];
+  }
+  textpackArtifacts.length = 0;
 
   emitProgress("finalize", 0, "Preparing output files...");
 
@@ -679,10 +508,10 @@ async function runPipeline({ file, settings }) {
     estimatedDurationMs,
     warnings,
     limits,
-    textpack: (textpackBundle || textpackValidationSummaries.length)
+    textpack: includeTextpack && textpackStatsSummaries.length
       ? {
         enabled: true,
-        mode: lowMemoryMode ? "per_part" : "global",
+        mode: "per_part",
         validation: summarizeTextpackValidation(textpackValidationSummaries),
         stats: summarizeTextpackStats(textpackStatsSummaries)
       }
@@ -695,6 +524,17 @@ async function runPipeline({ file, settings }) {
     format: inputFormat
   };
 
+  const textpackStatsSummary = summarizeTextpackStats(textpackStatsSummaries);
+  if (textpackStatsSummary.raw_text_bytes > 0 && textpackStatsSummary.textpack_literal_bytes > 0) {
+    generationReport.compression = {
+      raw_text_bytes: textpackStatsSummary.raw_text_bytes,
+      textpack_literal_bytes: textpackStatsSummary.textpack_literal_bytes,
+      compression_ratio: Number((textpackStatsSummary.raw_text_bytes / textpackStatsSummary.textpack_literal_bytes).toFixed(2))
+    };
+  }
+
+  generationReport.symbol_library = symbolLibrary.capacity;
+
   enqueueFile({ path: "local_memory/manifest/corpus.json", content: JSON.stringify(corpusManifest, null, 2) });
   enqueueFile({ path: "local_memory/manifest/sessions.jsonl", content: buildSessionManifest(allSessions) });
   enqueueFile({ path: "local_memory/manifest/chunks.jsonl", content: buildChunkManifest(manifestChunks) });
@@ -702,23 +542,6 @@ async function runPipeline({ file, settings }) {
 
   if (artifactVersions.length) {
     enqueueFile({ path: "local_memory/manifest/artifacts.jsonl", content: asJsonl(artifactVersions) });
-  }
-
-  if (textpackShardEntries.length && lowMemoryMode) {
-    enqueueFile({
-      path: "local_memory/textpack/textpack_manifest.json",
-      content: JSON.stringify(buildTextpackManifest({
-        version: 1,
-        encoding: "phrase-template-literal-v1",
-        shards: textpackShardEntries,
-        dictionary: null,
-        delta: {
-          enabled: settings.enableDeltaEncoding !== false,
-          max_depth: 1
-        },
-        stats: summarizeTextpackStats(textpackStatsSummaries)
-      }), null, 2)
-    });
   }
 
   if (includeRaw) {
@@ -733,20 +556,6 @@ async function runPipeline({ file, settings }) {
         content: "Original source file is included as input_full.* in this folder."
       });
     }
-
-    if (!includeSessionRawShards) {
-      enqueueFile({
-        path: "local_memory/raw/_session_shards_skipped.txt",
-        content: "Session raw shard files were skipped in low-memory mode for large input safety. Use textpack/ plus manifests for retrieval."
-      });
-    }
-
-    if (!includeRawInputParts) {
-      enqueueFile({
-        path: "local_memory/raw/_input_parts_skipped.txt",
-        content: "Original input parts were omitted from this ZIP to prevent browser memory exhaustion. Keep the original source file externally."
-      });
-    }
   }
 
   const conceptShards = createShards(allConcepts, "concepts", "local_memory/concepts", 2000);
@@ -758,7 +567,7 @@ async function runPipeline({ file, settings }) {
   for (const shard of edgeShards) {
     enqueueFile(shard);
   }
-  enqueueFile({ path: "local_memory/graph/concept_stats.jsonl", content: asJsonl(allConceptStats) });
+  enqueueFile({ path: "local_memory/graph/concept_stats.jsonl", content: asJsonl(globalGraph.conceptStats) });
 
   enqueueFile({
     path: "local_memory/index/concept_index.json",
@@ -781,11 +590,31 @@ async function runPipeline({ file, settings }) {
     content: JSON.stringify(textpackShardPaths, null, 2)
   });
 
-  if (textpackBundle) {
-    for (const fileEntry of textpackBundle.files) {
-      enqueueFile(fileEntry);
-    }
+  if (symbolLibrary.symbols.length) {
+    enqueueFile({
+      path: "local_memory/symbolic/symbol_library.json",
+      content: JSON.stringify({
+        version: 1,
+        capacity: symbolLibrary.capacity,
+        symbols: symbolLibrary.symbols
+      }, null, 2)
+    });
   }
+
+  const queryProtocol = buildQueryProtocol({
+    concepts: allConcepts,
+    edges: allEdges,
+    symbols: symbolLibrary.symbols,
+    conceptToSymbol: symbolLibrary.conceptToSymbol,
+    sessions: allSessions,
+    totalChunks: totalChunksProcessed,
+    rawTextBytes: bytes,
+    archiveBytes: generationReport.compression?.textpack_literal_bytes || 0
+  });
+  enqueueFile({
+    path: "local_memory/index/query_protocol.json",
+    content: JSON.stringify(queryProtocol, null, 2)
+  });
 
   enqueueFile({
     path: "local_memory/instructions/README.txt",
@@ -813,7 +642,7 @@ async function runPipeline({ file, settings }) {
     warnings,
     downloadName: makeDownloadName(file.name),
     report: generationReport,
-    rawFilePlan: includeRawInputParts ? buildRawFilePlan(partPlan, file.name, inputFormat) : []
+    rawFilePlan: includeRaw ? buildRawFilePlan(partPlan, file.name, inputFormat) : []
   });
 }
 
@@ -845,17 +674,6 @@ function buildJsonlPayload(records) {
   }
 
   return new Blob(blobParts, { type: "application/x-ndjson" });
-}
-
-function safePushEdge(target, edge, pushWarning, onCapReached) {
-  if (target.length >= MAX_EDGES_TOTAL) {
-    onCapReached();
-    pushWarning(`Edge cap reached at ${MAX_EDGES_TOTAL} records. Additional low-priority edges were omitted to keep memory bounded.`);
-    return false;
-  }
-
-  target.push(edge);
-  return true;
 }
 
 function emitProgress(stage, stageProgress, status) {
