@@ -5,9 +5,9 @@ import { extractConcepts } from "./concepts.js";
 import { buildGraphArtifacts } from "./graph.js";
 import { buildSymbolicStreams } from "./symbolic.js";
 import { buildTextpackBundle } from "./textpack.js";
-import { buildCoreObsessionsArtifact } from "./core-obsessions-artifact.js";
-import { buildSymbolLibrary } from "./symbol-library.js";
-import { buildQueryProtocol } from "./query.js";
+import { buildCoreObsessionsArtifact } from "./core-obsessions-artifact.js?v=20260309-01";
+import { buildSymbolLibrary } from "./symbol-library.js?v=20260309-01";
+import { buildQueryProtocol } from "./query.js?v=20260309-01";
 import { detectInputFormat, normalizeInputForRetrieval, rawInputShardPath } from "./ingest.js?v=20260308-02";
 import {
   buildChunkManifest,
@@ -17,7 +17,7 @@ import {
   buildInstructionsFile,
   buildSessionIndex,
   buildSessionManifest
-} from "./schemas.js";
+} from "./schemas.js?v=20260309-01";
 import {
   asJsonl,
   createShards,
