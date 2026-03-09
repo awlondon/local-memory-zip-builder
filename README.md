@@ -14,6 +14,7 @@ A GitHub Pages-compatible browser app that converts a `.txt`, `.html`, or `.json
 - Extracts recurring concepts and concept/chunk/session links
 - Builds graph and index artifacts as JSON/JSONL
 - Generates optional symbolic stream files per session
+- Emits a root-level core-obsessions graph artifact for interactive archive browsing
 - Packages everything with JSZip
 
 ## Output layout
@@ -21,6 +22,10 @@ A GitHub Pages-compatible browser app that converts a `.txt`, `.html`, or `.json
 The ZIP contains:
 
 ```text
+core-obsessions-graph.html
+core-obsessions-graph.css
+core-obsessions-graph.js
+core-obsessions-graph.data.json
 local_memory/
   manifest/
     corpus.json
@@ -58,6 +63,8 @@ local_memory/
   instructions/
     README.txt
 ```
+
+The root `core-obsessions-graph.*` bundle is a companion artifact that opens in a browser after unzipping. It highlights the archive's strongest recurring concepts, links each selected obsession to specific session shards, and can reconstruct raw thread text through `symbolic/` plus `textpack/`.
 
 Chunk, session, symbolic, and textpack metadata now include speaker-aware fields such as `speaker_role`, `speaker_label`, `speaker_inference_source`, `speaker_confidence`, `turn_index`, and `turn_role`. The pipeline prefers explicit labels like `User:` / `Assistant:` first, then metadata-style role markers, then inferred turn alternation and session defaults when labels are weak or missing.
 

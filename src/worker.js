@@ -5,6 +5,7 @@ import { extractConcepts } from "./concepts.js";
 import { buildGraphArtifacts } from "./graph.js";
 import { buildSymbolicStreams } from "./symbolic.js";
 import { buildTextpackBundle } from "./textpack.js";
+import { buildCoreObsessionsArtifact } from "./core-obsessions-artifact.js";
 import { detectInputFormat, normalizeInputForRetrieval, rawInputShardPath } from "./ingest.js?v=20260308-01";
 import {
   buildChunkManifest,
@@ -790,6 +791,18 @@ async function runPipeline({ file, settings }) {
     path: "local_memory/instructions/README.txt",
     content: buildInstructionsFile()
   });
+
+  const coreObsessionArtifactFiles = buildCoreObsessionsArtifact({
+    inputFileName: file.name,
+    sessions: allSessions,
+    concepts: allConcepts,
+    chunks: allFullChunks,
+    symbolicEnabled: includeSymbolic
+  });
+
+  for (const fileEntry of coreObsessionArtifactFiles) {
+    enqueueFile(fileEntry);
+  }
 
   emitProgress("finalize", 1, "Output files ready.");
 
