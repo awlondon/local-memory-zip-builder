@@ -30,8 +30,11 @@ export function buildGraphArtifacts(payload, onProgress = () => {}) {
     });
   }
 
+  // Cap concept links per chunk to top 6 to control edge volume at scale.
+  const MAX_CONCEPT_LINKS_PER_CHUNK = 6;
+
   for (const chunk of chunks) {
-    const links = chunkConcepts[chunk.chunk_id] || [];
+    const links = (chunkConcepts[chunk.chunk_id] || []).slice(0, MAX_CONCEPT_LINKS_PER_CHUNK);
     for (let i = 0; i < links.length; i += 1) {
       const link = links[i];
       const relationType = i === 0 ? "primary_topic_of" : "mentioned_in";
@@ -58,7 +61,7 @@ export function buildGraphArtifacts(payload, onProgress = () => {}) {
         tokenizeForSimilarity(previousChunk.text),
         tokenizeForSimilarity(currentChunk.text)
       );
-      if (similarity >= 0.14) {
+      if (similarity >= 0.25) {
         addEdge(previousId, currentId, "follows_from", 0.35 + similarity);
       }
 
@@ -125,7 +128,7 @@ export function buildGraphArtifacts(payload, onProgress = () => {}) {
       const conceptB = pairedConcepts[j];
 
       const overlapCount = countOverlap(conceptA.chunk_ids, conceptB.chunk_ids);
-      if (overlapCount >= 2) {
+      if (overlapCount >= 3) {
         addEdge(conceptA.concept_id, conceptB.concept_id, "often_cooccurs_with", 0.35 + overlapCount * 0.08);
       }
 
