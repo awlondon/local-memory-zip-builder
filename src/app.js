@@ -125,12 +125,18 @@ async function startGeneration() {
   const worker = new Worker(workerUrl, { type: "module" });
   state.worker = worker;
 
-  worker.addEventListener("message", async (event) => {
-    try {
-      await handleWorkerMessage(event.data);
-    } catch (error) {
-      failGeneration(error);
-    }
+  // Serialize async message handling — without this, overlapping awaits
+  // (e.g. file_batch addFile still in-flight when complete arrives) can
+  // cause finishGeneration() to null out zipBuilder mid-stream.
+  let messageQueue = Promise.resolve();
+  worker.addEventListener("message", (event) => {
+    messageQueue = messageQueue.then(async () => {
+      try {
+        await handleWorkerMessage(event.data);
+      } catch (error) {
+        failGeneration(error);
+      }
+    });
   });
 
   worker.addEventListener("error", (event) => {
