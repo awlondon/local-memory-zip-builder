@@ -5,14 +5,10 @@ import { extractConcepts } from "./concepts.js";
 import { buildGraphArtifacts } from "./graph.js";
 import { buildSymbolicStreams } from "./symbolic.js";
 import { buildTextpackBundle } from "./textpack.js";
-<<<<<<< HEAD
 import { buildCoreObsessionsArtifact } from "./core-obsessions-artifact.js";
-import { detectInputFormat, normalizeInputForRetrieval, rawInputShardPath } from "./ingest.js?v=20260308-01";
-=======
 import { buildSymbolLibrary } from "./symbol-library.js";
 import { buildQueryProtocol } from "./query.js";
 import { detectInputFormat, normalizeInputForRetrieval, rawInputShardPath } from "./ingest.js?v=20260308-02";
->>>>>>> b58e50ffe910b305203987058cf11e084ae8a96e
 import {
   buildChunkManifest,
   buildConceptIndex,
