@@ -78,6 +78,10 @@ export function buildCoreObsessionsArtifact(payload) {
     {
       path: "core-obsessions-graph.data.json",
       content: JSON.stringify(data, null, 2)
+    },
+    {
+      path: "core-obsessions-agent-README.md",
+      content: buildAgentReadme(data)
     }
   ];
 }
@@ -398,6 +402,55 @@ function buildHtmlTemplate(data) {
 </body>
 </html>
 `;
+}
+
+function buildAgentReadme(data) {
+  const obsessions = Array.isArray(data?.obsessions) ? data.obsessions : [];
+  const threads = Array.isArray(data?.threads) ? data.threads : [];
+
+  return [
+    "# Core Obsessions Agent Notes",
+    "",
+    "Use this guide if you need to rebuild or refine `core-obsessions-graph.*` from the archive contents.",
+    "",
+    "## Goal",
+    "Derive a compact graph of the archive's strongest recurring concepts, then link each concept to concrete session evidence threads.",
+    "",
+    "## Inputs",
+    "- `local_memory/index/concept_index.json`",
+    "- `local_memory/index/session_index.json`",
+    "- `local_memory/manifest/sessions.jsonl`",
+    "- `local_memory/manifest/chunks.jsonl`",
+    "- `local_memory/concepts/concepts_*.jsonl`",
+    "- `local_memory/symbolic/*.stream.jsonl` when symbolic streams are present",
+    "- `local_memory/textpack/*` when raw reconstruction is needed",
+    "",
+    "## Procedure",
+    "1. Rank concepts by importance, recurrence count, and spread across sessions.",
+    "2. Filter generic archive noise such as `session`, `chunk`, `textpack`, `user`, `assistant`, and similar container terms.",
+    "3. Merge near-duplicate concepts using normalized labels and token overlap.",
+    "4. Select a small top set as the archive's core obsessions.",
+    "5. For each obsession, choose the strongest linked sessions as evidence threads.",
+    "6. For each thread, include `session_id`, `title`, `chunk_count`, `turn_count`, `symbolic_path`, and packaged `raw_text` when chunk text can be reconstructed.",
+    "7. Emit updated `core-obsessions-graph.data.json`, and if needed rebuild the HTML bundle with the JSON embedded inline.",
+    "",
+    "## Current Bundle Snapshot",
+    `- Generated obsessions: ${obsessions.length}`,
+    `- Linked threads: ${threads.length}`,
+    "",
+    "## Output Shape",
+    "- `profile`",
+    "- `stats`",
+    "- `obsessions[]`",
+    "- `threads[]`",
+    "- `graph_thread_ids[]`",
+    "",
+    "## Reconstruction Rule",
+    "Prefer packaged `raw_text`. If it is missing, reconstruct from `symbolic/*.stream.jsonl` plus the referenced `textpack` shards.",
+    "",
+    "## Usage Note",
+    "This README is a fallback guide. The ZIP builder should already generate `core-obsessions-graph.*` automatically."
+  ].join("\n");
 }
 
 function buildCssTemplate() {

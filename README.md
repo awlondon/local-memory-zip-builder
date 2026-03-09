@@ -26,6 +26,7 @@ core-obsessions-graph.html
 core-obsessions-graph.css
 core-obsessions-graph.js
 core-obsessions-graph.data.json
+core-obsessions-agent-README.md
 local_memory/
   manifest/
     corpus.json
@@ -64,7 +65,7 @@ local_memory/
     README.txt
 ```
 
-The root `core-obsessions-graph.*` bundle is a companion artifact that opens in a browser after unzipping. It highlights the archive's strongest recurring concepts, links each selected obsession to specific session shards, and can reconstruct raw thread text through `symbolic/` plus `textpack/`.
+The root `core-obsessions-graph.*` bundle is a companion artifact that opens in a browser after unzipping. It highlights the archive's strongest recurring concepts, links each selected obsession to specific session shards, and can reconstruct raw thread text through `symbolic/` plus `textpack/`. A companion `core-obsessions-agent-README.md` is also included as a fallback recipe for an LLM agent to regenerate or refine the graph directly from `local_memory/`.
 
 Chunk, session, symbolic, and textpack metadata now include speaker-aware fields such as `speaker_role`, `speaker_label`, `speaker_inference_source`, `speaker_confidence`, `turn_index`, and `turn_role`. The pipeline prefers explicit labels like `User:` / `Assistant:` first, then metadata-style role markers, then inferred turn alternation and session defaults when labels are weak or missing.
 
