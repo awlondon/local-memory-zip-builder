@@ -93,8 +93,8 @@ async function runPipeline({ file, settings }) {
   const LARGE_INPUT_BYTES = 800 * 1024 * 1024;
   const isLargeInput = bytes > LARGE_INPUT_BYTES;
 
-  let includeRaw = settings.includeRaw !== false;
-  let includeLegacyChunkText = settings.includeLegacyChunkText !== false;
+  let includeRaw = settings.includeRaw === true;
+  let includeLegacyChunkText = settings.includeLegacyChunkText === true;
   const includeSymbolic = settings.includeSymbolic !== false;
   const includeTextpack = true;
 
