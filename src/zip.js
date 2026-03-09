@@ -51,10 +51,10 @@ export async function createZipBlob(files, onProgress) {
   return builder.generate(onProgress);
 }
 
-// ── Streaming zip builder (STORE, no JSZip) ──────────────────────────────────
+// ── Streaming zip builder (per-entry DEFLATE, no JSZip) ──────────────────────
 // Processes files one-at-a-time so only one file's raw bytes are in memory at
-// any given time. Uses STORE compression (no deflate) to avoid memory
-// amplification. Final zip is assembled as a Blob from pre-built parts.
+// any given time. Each entry is individually deflated via CompressionStream then
+// discarded. Final zip is assembled as a Blob from pre-built parts.
 
 const CRC_TABLE = new Uint32Array(256);
 for (let n = 0; n < 256; n++) {
@@ -106,6 +106,37 @@ function writeU32(view, offset, value) {
   view.setUint32(offset, value, true);
 }
 
+const HAS_COMPRESSION_STREAM = typeof CompressionStream !== "undefined";
+
+async function deflateRaw(data) {
+  const cs = new CompressionStream("deflate-raw");
+  const writer = cs.writable.getWriter();
+  const reader = cs.readable.getReader();
+
+  const chunks = [];
+  const readAll = (async () => {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      chunks.push(value);
+    }
+  })();
+
+  writer.write(data);
+  writer.close();
+  await readAll;
+
+  let totalLen = 0;
+  for (const c of chunks) totalLen += c.length;
+  const result = new Uint8Array(totalLen);
+  let pos = 0;
+  for (const c of chunks) {
+    result.set(c, pos);
+    pos += c.length;
+  }
+  return result;
+}
+
 export function createStreamingZipBuilder() {
   const blobParts = [];
   const centralEntries = [];
@@ -131,8 +162,16 @@ export function createStreamingZipBuilder() {
     const data = await toUint8Array(entry.content);
     const fileName = encodeUTF8(entry.path);
     const crc = crc32(data);
-    const size = data.length;
+    const uncompressedSize = data.length;
     const dt = dosDateTime();
+
+    // Decide compression: use DEFLATE unless entry explicitly asks for STORE
+    // or CompressionStream is unavailable
+    const wantStore = entry.options?.compression === "STORE";
+    const useDeflate = HAS_COMPRESSION_STREAM && !wantStore;
+    const compressionMethod = useDeflate ? 8 : 0; // 8=DEFLATE, 0=STORE
+    const compressed = useDeflate ? await deflateRaw(data) : data;
+    const compressedSize = compressed.length;
 
     // Local file header (30 bytes + filename)
     const localHeader = new ArrayBuffer(30 + fileName.length);
@@ -140,12 +179,12 @@ export function createStreamingZipBuilder() {
     writeU32(lv, 0, 0x04034B50);   // signature
     writeU16(lv, 4, 20);            // version needed
     writeU16(lv, 6, 0x0800);        // flags (UTF-8)
-    writeU16(lv, 8, 0);             // compression: STORE
+    writeU16(lv, 8, compressionMethod);
     writeU16(lv, 10, dt.time);
     writeU16(lv, 12, dt.date);
     writeU32(lv, 14, crc);
-    writeU32(lv, 18, size);         // compressed size
-    writeU32(lv, 22, size);         // uncompressed size
+    writeU32(lv, 18, compressedSize);
+    writeU32(lv, 22, uncompressedSize);
     writeU16(lv, 26, fileName.length);
     writeU16(lv, 28, 0);            // extra field length
     new Uint8Array(localHeader).set(fileName, 30);
@@ -157,12 +196,12 @@ export function createStreamingZipBuilder() {
     writeU16(cv, 4, 20);            // version made by
     writeU16(cv, 6, 20);            // version needed
     writeU16(cv, 8, 0x0800);        // flags (UTF-8)
-    writeU16(cv, 10, 0);            // compression: STORE
+    writeU16(cv, 10, compressionMethod);
     writeU16(cv, 12, dt.time);
     writeU16(cv, 14, dt.date);
     writeU32(cv, 16, crc);
-    writeU32(cv, 20, size);         // compressed size
-    writeU32(cv, 24, size);         // uncompressed size
+    writeU32(cv, 20, compressedSize);
+    writeU32(cv, 24, uncompressedSize);
     writeU16(cv, 28, fileName.length);
     writeU16(cv, 30, 0);            // extra field length
     writeU16(cv, 32, 0);            // comment length
@@ -173,11 +212,11 @@ export function createStreamingZipBuilder() {
     new Uint8Array(cdEntry).set(fileName, 46);
 
     blobParts.push(new Uint8Array(localHeader));
-    blobParts.push(data);
+    blobParts.push(compressed);
     centralEntries.push(new Uint8Array(cdEntry));
 
-    offset += localHeader.byteLength + data.length;
-    unflushedBytes += localHeader.byteLength + data.length;
+    offset += localHeader.byteLength + compressedSize;
+    unflushedBytes += localHeader.byteLength + compressedSize;
     fileCount += 1;
 
     if (unflushedBytes >= COMPACT_THRESHOLD) {
