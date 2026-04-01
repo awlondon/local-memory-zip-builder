@@ -10,17 +10,17 @@
 <body>
   <main class="app-shell">
     <header class="hero">
-      <p class="eyebrow">Client-side memory packaging</p>
+      <p class="eyebrow">Memory packaging</p>
       <h1>Local Memory ZIP Builder</h1>
       <p class="lead">
-        Upload one <code>.txt</code>, <code>.html</code>, or <code>.json</code> file to generate a deterministic <code>local_memory/</code> archive with symbolic streams, textpack reconstruction, and compatibility shards for local agents.
+        Upload a <code>.txt</code>, <code>.html</code>, or <code>.json</code> file to generate a ready-to-use <code>local_memory/</code> archive for your local agent.
       </p>
     </header>
 
     <section class="card">
       <h2>Input</h2>
       <p class="help">
-        Drag and drop a text/HTML/JSON file, or choose one manually. Processing runs in a Web Worker to keep the UI responsive.
+        Drag and drop a file, or choose one manually.
       </p>
       <div id="drop-zone" class="drop-zone" tabindex="0" role="button" aria-label="Drop a text, HTML, or JSON file here">
         <p id="drop-label">Drop .txt, .html, or .json file here or click to browse</p>
@@ -42,7 +42,7 @@
         </label>
 
         <label>
-          Concept extraction aggressiveness
+          Concept detail level
           <select id="concept-aggressiveness">
             <option value="low">Low</option>
             <option value="medium" selected>Medium</option>
@@ -52,22 +52,22 @@
 
         <label class="checkbox">
           <input id="include-symbolic" type="checkbox" checked>
-          Include symbolic streams
+          Include symbolic layer
         </label>
 
         <label class="checkbox">
           <input id="include-textpack" type="checkbox" checked>
-          Include textpack reconstruction layer
+          Include compressed reconstruction data
         </label>
 
         <label class="checkbox">
           <input id="include-legacy-chunk-text" type="checkbox">
-          Include legacy chunk text shards (redundant with textpack)
+          Include legacy chunks (usually not needed)
         </label>
 
         <label class="checkbox">
           <input id="include-raw" type="checkbox">
-          Include raw session/input shards (redundant with textpack)
+          Include raw session data (usually not needed)
         </label>
       </div>
     </section>
@@ -80,7 +80,7 @@
 
     <section id="split-output" class="card hidden">
       <h2>Split files</h2>
-      <p class="help">Download each part below, then process them one at a time through the builder above.</p>
+      <p class="help">Download each part below, then process them one at a time.</p>
       <div id="split-links" class="split-links"></div>
     </section>
 
@@ -104,8 +104,7 @@
         <li>Download the ZIP file.</li>
         <li>Unarchive it locally.</li>
         <li>Keep the resulting <code>local_memory/</code> directory intact.</li>
-        <li>Point your local LLM/coding agent at that directory.</li>
-        <li>Have the agent read manifests and indices first, then use <code>symbolic/</code> and <code>textpack/</code> before raw shards.</li>
+        <li>Point your local agent at that directory.</li>
       </ol>
     </section>
   </main>
